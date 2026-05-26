@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+.coverage
+htmlcov/
+dist/
+build/
+.DS_Store
+~/.feishu-bot-claude/
+vendor/lark-cli/
