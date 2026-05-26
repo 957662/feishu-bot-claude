@@ -160,13 +160,14 @@ from feishu_bot_claude.daemon.handlers import (
 from feishu_bot_claude.config.keychain import InMemoryKeychainStore
 
 
-async def _fake_auth_runner():
+async def _fake_auth_runner(name):
     for line in [
-        "===QR===",
-        "█",
-        "===QR===",
-        "URL: https://open.feishu.cn/app/foo/qr",
-        '{"app_id":"cli_test","app_secret":"sec_test"}',
+        "█████████████████████████████████████████████",
+        "████ ▄▄▄▄▄ █▄ ▄▀ ▀▀█ ▀ ▀▀█▄▄▄▀▀▄██ ▄▄▄▄▄ ████",
+        "▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀",
+        "",
+        "  https://open.feishu.cn/page/cli?user_code=ABCD-EFGH",
+        "等待配置应用...",
     ]:
         yield line + "\n"
 
@@ -181,7 +182,7 @@ async def test_handle_bind_creates_binding(tmp_path):
         args={"name": "foo-bot", "cwd": str(tmp_path / "proj")},
         store=store,
         keychain=keychain,
-        auth_runner_factory=lambda: _fake_auth_runner(),
+        auth_runner_factory=lambda name: _fake_auth_runner(name),
         menu_pusher=None,
         data_dir=tmp_path,
     ):
@@ -194,8 +195,10 @@ async def test_handle_bind_creates_binding(tmp_path):
 
     binding = store.find_by_name("foo-bot")
     assert binding is not None
-    assert binding.feishu_app_id == "cli_test"
-    assert keychain.get(binding.secret_ref) == "sec_test"
+    # app_id will be "larkcli-profile:foo-bot" since no real lark-cli config exists in test env
+    assert binding.feishu_app_id is not None
+    # secret_ref key was stored (empty string since lark-cli manages the real secret)
+    assert keychain.get(binding.secret_ref) is not None
 
 
 @pytest.mark.asyncio

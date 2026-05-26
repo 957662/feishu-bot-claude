@@ -54,7 +54,7 @@ async def _run_daemon() -> None:
         bindings_path=bindings_path,
         orchestrator=orchestrator,
         keychain=keychain,
-        auth_runner_factory=lambda: real_lark.auth_bot_new_stream(),
+        auth_runner_factory=lambda name: real_lark.auth_bot_new_stream(name),
         menu_pusher=real_lark,
         data_dir=data_dir,
     )

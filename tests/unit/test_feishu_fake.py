@@ -75,7 +75,7 @@ async def test_fake_auth_bot_new_stream_yields_lines():
     lark = FakeLarkCli()
     lark.set_auth_lines(["line 1", "line 2", '{"app_id":"x","app_secret":"y"}'])
     received = []
-    async for line in lark.auth_bot_new_stream():
+    async for line in lark.auth_bot_new_stream("test-bot"):
         received.append(line.rstrip("\n"))
     assert received == ["line 1", "line 2", '{"app_id":"x","app_secret":"y"}']
 

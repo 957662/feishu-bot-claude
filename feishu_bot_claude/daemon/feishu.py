@@ -40,8 +40,8 @@ class LarkCli(ABC):
         """
 
     @abstractmethod
-    def auth_bot_new_stream(self) -> AsyncIterator[str]:
-        """Spawn `lark-cli auth bot-new` and stream its stdout line-by-line."""
+    def auth_bot_new_stream(self, name: str) -> AsyncIterator[str]:
+        """Spawn `lark-cli config init --new --name <name>` and stream its stdout line-by-line."""
 
     @abstractmethod
     async def push_menu(self, app_id: str, menu_json: dict) -> None:
@@ -124,7 +124,7 @@ class FakeLarkCli(LarkCli):
             if max_events > 0 and emitted >= max_events:
                 break
 
-    async def auth_bot_new_stream(self) -> AsyncIterator[str]:
+    async def auth_bot_new_stream(self, name: str) -> AsyncIterator[str]:
         for line in self._auth_lines:
             await asyncio.sleep(0)
             yield line + "\n"
@@ -255,9 +255,9 @@ class RealLarkCli(LarkCli):
                     proc.kill()
                     await proc.wait()
 
-    async def auth_bot_new_stream(self) -> AsyncIterator[str]:
+    async def auth_bot_new_stream(self, name: str) -> AsyncIterator[str]:
         proc = await asyncio.create_subprocess_exec(
-            self._binary, "auth", "bot-new",
+            self._binary, "config", "init", "--new", "--name", name,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
             env=os.environ.copy(),

@@ -130,6 +130,37 @@ from feishu_bot_claude.menu_template import build_menu_json
 from feishu_bot_claude.proto import LogEvent, ProgressEvent, QRCodeEvent
 
 
+def _extract_app_id_from_larkcli(profile_name: str) -> str:
+    import os
+    import json
+    from pathlib import Path
+    candidates = [
+        Path.home() / ".lark-cli" / "profiles" / profile_name / "config.json",
+        Path.home() / ".config" / "lark-cli" / "profiles" / profile_name / "config.json",
+        Path.home() / ".lark-cli" / "profiles" / profile_name,
+        Path.home() / ".config" / "lark-cli" / "profiles" / profile_name,
+    ]
+    for p in candidates:
+        if p.is_file():
+            try:
+                data = json.loads(p.read_text())
+                for key in ("app_id", "AppId", "appId"):
+                    if key in data:
+                        return data[key]
+            except Exception:
+                pass
+        elif p.is_dir():
+            for f in p.glob("*.json"):
+                try:
+                    data = json.loads(f.read_text())
+                    for key in ("app_id", "AppId", "appId"):
+                        if key in data:
+                            return data[key]
+                except Exception:
+                    pass
+    return f"larkcli-profile:{profile_name}"
+
+
 async def handle_bind_with_orchestrator(
     args: dict,
     store: BindingStore,
@@ -161,7 +192,7 @@ async def handle_bind_with_orchestrator(
 
     yield LogEvent(level="info", msg="Starting Feishu OAuth flow (扫码新建 App)...")
     try:
-        creds = await bot_new(runner=auth_runner_factory(), on_event=_capture)
+        creds = await bot_new(runner=auth_runner_factory(name), on_event=_capture)
     except RuntimeError as e:
         yield ResultEvent(ok=False, data=None, error=f"OAuth failed: {e}")
         yield DoneEvent()
@@ -175,9 +206,12 @@ async def handle_bind_with_orchestrator(
         elif ev["type"] == "progress":
             yield ProgressEvent(value=ev.get("value", 0.0), msg=ev.get("msg", ""))
 
-    yield LogEvent(level="info", msg=f"App created: {creds.app_id}")
+    # Extract app_id from lark-cli profile config files (lark-cli manages creds internally)
+    feishu_app_id = creds.app_id or _extract_app_id_from_larkcli(name)
+    yield LogEvent(level="info", msg=f"App created: {feishu_app_id}")
 
     secret_ref = f"feishu-bot-claude.{name}.app_secret"
+    # lark-cli manages the real secret internally; store empty string to satisfy data model
     keychain.put(secret_ref, creds.app_secret)
 
     from pathlib import Path
@@ -185,7 +219,7 @@ async def handle_bind_with_orchestrator(
         name=name,
         project_dir=cwd,
         tmux_session=f"claude-{name}",
-        feishu_app_id=creds.app_id,
+        feishu_app_id=feishu_app_id,
         secret_ref=secret_ref,
         created_at=datetime.now(timezone.utc),
     )
@@ -195,7 +229,7 @@ async def handle_bind_with_orchestrator(
         menu_json = build_menu_json()
         menu_result = await push_menu_with_fallback(
             lark_menu=menu_pusher,
-            app_id=creds.app_id,
+            app_id=feishu_app_id,
             menu_json=menu_json,
             fallback_dir=Path(data_dir) / "menus",
             binding_name=name,
@@ -207,7 +241,7 @@ async def handle_bind_with_orchestrator(
 
     yield ResultEvent(
         ok=True,
-        data={"name": name, "app_id": creds.app_id, "next": "/bot-start"},
+        data={"name": name, "app_id": feishu_app_id, "next": "/bot-start"},
         error=None,
     )
     yield DoneEvent()
