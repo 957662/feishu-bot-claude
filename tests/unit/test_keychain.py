@@ -33,3 +33,67 @@ def test_in_memory_store_delete():
 def test_in_memory_store_delete_missing_is_noop():
     store = InMemoryKeychainStore()
     store.delete("nonexistent")  # no raise
+
+
+import subprocess
+from unittest.mock import patch
+
+from feishu_bot_claude.config.keychain import MacOSKeychainStore
+
+
+def _completed(returncode=0, stdout="", stderr=""):
+    return subprocess.CompletedProcess(args=[], returncode=returncode, stdout=stdout, stderr=stderr)
+
+
+@patch("feishu_bot_claude.config.keychain.subprocess.run")
+def test_macos_keychain_put_calls_security_add(mock_run):
+    mock_run.return_value = _completed(0)
+    store = MacOSKeychainStore(service_prefix="feishu-bot-claude")
+    store.put("foo-bot.app_secret", "s3cret")
+    call_args = mock_run.call_args[0][0]
+    assert call_args[0:2] == ["security", "add-generic-password"]
+    assert "-U" in call_args  # update-if-exists
+    assert "-a" in call_args and "foo-bot.app_secret" in call_args
+    assert "-s" in call_args and "feishu-bot-claude" in call_args
+    assert "-w" in call_args and "s3cret" in call_args
+
+
+@patch("feishu_bot_claude.config.keychain.subprocess.run")
+def test_macos_keychain_get_returns_password_on_success(mock_run):
+    mock_run.return_value = _completed(0, stdout="s3cret\n")
+    store = MacOSKeychainStore(service_prefix="feishu-bot-claude")
+    assert store.get("foo-bot.app_secret") == "s3cret"
+    call_args = mock_run.call_args[0][0]
+    assert call_args[0:2] == ["security", "find-generic-password"]
+    assert "-w" in call_args
+
+
+@patch("feishu_bot_claude.config.keychain.subprocess.run")
+def test_macos_keychain_get_returns_none_when_missing(mock_run):
+    mock_run.return_value = _completed(44, stderr="security: SecKeychainSearchCopyNext: ...")
+    store = MacOSKeychainStore(service_prefix="feishu-bot-claude")
+    assert store.get("missing") is None
+
+
+@patch("feishu_bot_claude.config.keychain.subprocess.run")
+def test_macos_keychain_get_raises_on_other_errors(mock_run):
+    mock_run.return_value = _completed(1, stderr="permission denied")
+    store = MacOSKeychainStore(service_prefix="feishu-bot-claude")
+    with pytest.raises(RuntimeError, match="keychain get failed"):
+        store.get("foo")
+
+
+@patch("feishu_bot_claude.config.keychain.subprocess.run")
+def test_macos_keychain_delete_succeeds(mock_run):
+    mock_run.return_value = _completed(0)
+    store = MacOSKeychainStore(service_prefix="feishu-bot-claude")
+    store.delete("foo-bot.app_secret")
+    call_args = mock_run.call_args[0][0]
+    assert call_args[0:2] == ["security", "delete-generic-password"]
+
+
+@patch("feishu_bot_claude.config.keychain.subprocess.run")
+def test_macos_keychain_delete_missing_is_noop(mock_run):
+    mock_run.return_value = _completed(44)
+    store = MacOSKeychainStore(service_prefix="feishu-bot-claude")
+    store.delete("missing")  # no raise
