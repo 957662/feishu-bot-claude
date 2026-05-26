@@ -27,7 +27,7 @@ class Request:
 
     def validate(self) -> None:
         """Raise ValueError if the request is malformed."""
-        known_ops = {"bind", "unbind", "start", "stop", "list", "config", "status", "shell"}
+        known_ops = {"bind", "unbind", "start", "stop", "list", "config", "status", "shell", "ping"}
         if self.op not in known_ops:
             raise ValueError(f"unknown op: {self.op!r} (known: {sorted(known_ops)})")
         required = {
@@ -39,6 +39,7 @@ class Request:
             "status": (),
             "list": (),
             "shell": ("cwd",),
+            "ping": (),
         }
         for key in required[self.op]:
             if key not in self.args:
