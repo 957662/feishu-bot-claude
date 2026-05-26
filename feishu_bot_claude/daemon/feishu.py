@@ -13,6 +13,10 @@ from abc import ABC, abstractmethod
 from typing import AsyncIterator
 
 
+class FeishuThrottled(RuntimeError):
+    """Raised when Feishu returns error 11232 (rate limited)."""
+
+
 class LarkCli(ABC):
     """Async wrapper around the `lark-cli` binary."""
 
@@ -55,6 +59,8 @@ class FakeLarkCli(LarkCli):
         self._auth_should_fail = False
         self._menu_pushes: list[dict] = []
         self._menu_should_fail = False
+        self._pending_throttle = 0
+        self.throttle_attempts = 0
 
     def _next_message_id(self) -> str:
         self._counter += 1
@@ -71,7 +77,15 @@ class FakeLarkCli(LarkCli):
     def fail_menu_push(self, fail: bool = True) -> None:
         self._menu_should_fail = fail
 
+    def simulate_throttle(self, times: int) -> None:
+        """Test helper: the next `times` calls to send_text/send_card fail with throttle."""
+        self._pending_throttle = times
+
     async def send_text(self, chat_id: str, text: str, idempotency_key: str | None = None) -> str:
+        if self._pending_throttle > 0:
+            self._pending_throttle -= 1
+            self.throttle_attempts += 1
+            raise FeishuThrottled("11232 rate limited")
         self.send_calls.append({
             "kind": "text",
             "chat_id": chat_id,
@@ -81,6 +95,10 @@ class FakeLarkCli(LarkCli):
         return self._next_message_id()
 
     async def send_card(self, chat_id: str, card: dict, idempotency_key: str | None = None) -> str:
+        if self._pending_throttle > 0:
+            self._pending_throttle -= 1
+            self.throttle_attempts += 1
+            raise FeishuThrottled("11232 rate limited")
         self.send_calls.append({
             "kind": "card",
             "chat_id": chat_id,

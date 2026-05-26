@@ -93,3 +93,28 @@ async def test_fake_push_menu_can_fail():
     lark.fail_menu_push(True)
     with pytest.raises(RuntimeError, match="fake menu API failure"):
         await lark.push_menu(app_id="cli_x", menu_json={})
+
+
+from feishu_bot_claude.daemon.feishu import FeishuThrottled
+
+
+@pytest.mark.asyncio
+async def test_fake_simulates_11232_then_succeeds():
+    """FakeLarkCli can be configured to fail with 11232 N times before succeeding."""
+    lark = FakeLarkCli()
+    lark.simulate_throttle(times=2)
+    # First two calls should raise; third should succeed
+    with pytest.raises(FeishuThrottled):
+        await lark.send_text(chat_id="oc", text="hi")
+    with pytest.raises(FeishuThrottled):
+        await lark.send_text(chat_id="oc", text="hi")
+    msg_id = await lark.send_text(chat_id="oc", text="hi")
+    assert msg_id.startswith("om_fake_")
+    assert lark.throttle_attempts == 2
+
+
+@pytest.mark.asyncio
+async def test_feishu_throttled_is_runtimeerror_subclass():
+    """FeishuThrottled is a RuntimeError so it can be caught broadly if needed."""
+    e = FeishuThrottled("rate limited")
+    assert isinstance(e, RuntimeError)
