@@ -73,7 +73,8 @@ def test_build_card_combines_elements():
         elements=[build_markdown("hi"), build_divider(), build_note("done")],
     )
     assert card["header"]["title"]["content"] == "t"
-    assert len(card["elements"]) == 3
-    assert card["elements"][0]["tag"] == "markdown"
-    assert card["elements"][1]["tag"] == "hr"
-    assert card["elements"][2]["tag"] == "note"
+    elements = card["body"]["elements"]  # schema 2.0 nests under body
+    assert len(elements) == 3
+    assert elements[0]["tag"] == "markdown"
+    assert elements[1]["tag"] == "hr"
+    assert elements[2]["tag"] == "note"

@@ -7,26 +7,28 @@
       "content": "🤖 Claude · test-project"
     }
   },
-  "elements": [
-    {
-      "tag": "collapsible_panel",
-      "expanded": false,
-      "header": {
-        "title": {
-          "tag": "plain_text",
-          "content": "🤖 Task  general-purpose  ✓"
-        }
+  "body": {
+    "elements": [
+      {
+        "tag": "collapsible_panel",
+        "expanded": false,
+        "header": {
+          "title": {
+            "tag": "plain_text",
+            "content": "🤖 Task  general-purpose  ✓"
+          }
+        },
+        "elements": [
+          {
+            "tag": "markdown",
+            "content": "```\nFound 3 matches in auth.go\n```"
+          }
+        ]
       },
-      "elements": [
-        {
-          "tag": "markdown",
-          "content": "```\nFound 3 matches in auth.go\n```"
-        }
-      ]
-    },
-    {
-      "tag": "markdown",
-      "content": "找到 3 处。"
-    }
-  ]
+      {
+        "tag": "markdown",
+        "content": "找到 3 处。"
+      }
+    ]
+  }
 }

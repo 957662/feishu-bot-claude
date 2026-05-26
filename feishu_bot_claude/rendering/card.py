@@ -59,8 +59,10 @@ def build_action_buttons(buttons: Iterable[tuple[str, str, ButtonType]]) -> dict
 
 
 def build_card(header: dict, elements: list[dict]) -> dict:
+    # Feishu schema 2.0 expects elements nested under "body", not at the top level.
+    # See: open.feishu.cn card docs.
     return {
         "schema": "2.0",
         "header": header,
-        "elements": elements,
+        "body": {"elements": elements},
     }

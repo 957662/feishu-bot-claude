@@ -149,7 +149,12 @@ class RealLarkCli(LarkCli):
         self._extra_env = dict(extra_env or {})
 
     async def _run_raw(self, args: list[str], timeout: float = 30.0) -> tuple[str, int]:
-        """Run `lark-cli <args>`. Return (stdout, returncode)."""
+        """Run `lark-cli <args>`. Return (combined stdout+stderr, returncode).
+
+        stderr is merged into the returned text so callers can include real
+        error details when reporting failures. (Some lark-cli errors go to
+        stderr while exit code is non-zero, leaving stdout empty.)
+        """
         env = os.environ.copy()
         env.update(self._extra_env)
         proc = await asyncio.create_subprocess_exec(
@@ -164,22 +169,37 @@ class RealLarkCli(LarkCli):
             proc.kill()
             await proc.wait()
             raise
-        return stdout.decode(), proc.returncode
+        combined = stdout.decode()
+        err_text = stderr.decode()
+        if err_text.strip():
+            combined = combined + ("\n[stderr]\n" if combined.strip() else "") + err_text
+        return combined, proc.returncode
 
     def _common_args(self) -> list[str]:
         return ["--as", "bot"] if self._as_bot else []
 
     def _extract_message_id(self, out: str) -> str:
-        """lark-cli emits a result JSON object; message_id may be nested under `data`."""
+        """lark-cli emits a (possibly pretty-printed) JSON object on stdout.
+
+        Try parsing the whole output as JSON first; fall back to scanning each
+        line. message_id is usually under `data.message_id` for v1+ output.
+        """
+        candidates: list[dict] = []
+        # Whole-output JSON (pretty-printed)
+        try:
+            candidates.append(json.loads(out.strip()))
+        except json.JSONDecodeError:
+            pass
+        # Line-by-line for single-line JSON outputs
         for line in reversed(out.strip().splitlines()):
             line = line.strip()
-            if not line.startswith("{"):
-                continue
-            try:
-                payload = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            # Try common shapes
+            if line.startswith("{") and line.endswith("}"):
+                try:
+                    candidates.append(json.loads(line))
+                except json.JSONDecodeError:
+                    pass
+
+        for payload in candidates:
             for path in (("message_id",), ("data", "message_id"), ("data", "messageId"), ("messageId",)):
                 node = payload
                 ok = True

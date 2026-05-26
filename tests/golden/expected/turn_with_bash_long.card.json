@@ -7,35 +7,37 @@
       "content": "🤖 Claude · test-project"
     }
   },
-  "elements": [
-    {
-      "tag": "collapsible_panel",
-      "expanded": false,
-      "header": {
-        "title": {
-          "tag": "plain_text",
-          "content": "💻 Bash  ls -la /tmp  ✓  200 lines"
-        }
+  "body": {
+    "elements": [
+      {
+        "tag": "collapsible_panel",
+        "expanded": false,
+        "header": {
+          "title": {
+            "tag": "plain_text",
+            "content": "💻 Bash  ls -la /tmp  ✓  200 lines"
+          }
+        },
+        "elements": [
+          {
+            "tag": "markdown",
+            "content": "```\nfake-line-0\nfake-line-1\nfake-line-2\nfake-line-3\nfake-line-4\nfake-line-5\nfake-line-6\nfake-line-7\nfake-line-8\nfake-line-9\nfake-line-10\nfake-line-11\nfake-line-12\nfake-line-13\nfake-line-14\nfake-line-15\nfake-line-16\nfake-line-17\nfake-line-18\nfake-line-19\n```\n_...省略 180 行..._"
+          }
+        ]
       },
-      "elements": [
-        {
-          "tag": "markdown",
-          "content": "```\nfake-line-0\nfake-line-1\nfake-line-2\nfake-line-3\nfake-line-4\nfake-line-5\nfake-line-6\nfake-line-7\nfake-line-8\nfake-line-9\nfake-line-10\nfake-line-11\nfake-line-12\nfake-line-13\nfake-line-14\nfake-line-15\nfake-line-16\nfake-line-17\nfake-line-18\nfake-line-19\n```\n_...省略 180 行..._"
-        }
-      ]
-    },
-    {
-      "tag": "markdown",
-      "content": "好多文件,我列了 200 行。"
-    },
-    {
-      "tag": "note",
-      "elements": [
-        {
-          "tag": "plain_text",
-          "content": "500+20 tokens"
-        }
-      ]
-    }
-  ]
+      {
+        "tag": "markdown",
+        "content": "好多文件,我列了 200 行。"
+      },
+      {
+        "tag": "note",
+        "elements": [
+          {
+            "tag": "plain_text",
+            "content": "500+20 tokens"
+          }
+        ]
+      }
+    ]
+  }
 }

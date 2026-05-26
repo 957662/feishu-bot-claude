@@ -88,8 +88,7 @@ class OutboundPipeline:
             return
         chat_id = self._effective_chat_id()
         if not chat_id:
-            # No bootstrap message received yet — skip sending. The jsonl_offset
-            # advance will be reset when chat_id arrives so we replay everything.
+            # No bootstrap message received yet — skip sending.
             return
         card = render_turn_to_card(
             self._current_turn,
@@ -97,18 +96,27 @@ class OutboundPipeline:
             render_style=self._render_style,
         )
         await self._bucket.acquire()
-        if self._state.current_turn_card_id is None:
-            user_uuid = self._current_turn.user_event.uuid if self._current_turn.user_event else "orphan"
-            msg_id = await self._lark.send_card(
-                chat_id=chat_id,
-                card=card,
-                idempotency_key=f"{self._state.binding_name}-{user_uuid}",
-            )
-            self._state.set_current_turn_card(msg_id)
-        else:
-            await self._lark.update_card(
-                message_id=self._state.current_turn_card_id,
-                card=card,
+        try:
+            if self._state.current_turn_card_id is None:
+                user_uuid = self._current_turn.user_event.uuid if self._current_turn.user_event else "orphan"
+                msg_id = await self._lark.send_card(
+                    chat_id=chat_id,
+                    card=card,
+                    idempotency_key=f"{self._state.binding_name}-{user_uuid}",
+                )
+                self._state.set_current_turn_card(msg_id)
+            else:
+                await self._lark.update_card(
+                    message_id=self._state.current_turn_card_id,
+                    card=card,
+                )
+        except Exception as e:
+            # Single-card failure shouldn't abort the whole backlog replay.
+            # Log + skip this turn (current_turn_card_id stays None so next
+            # event in the same turn will retry as a fresh send).
+            logger.warning(
+                "send/update card failed for turn (binding=%s): %s",
+                self._state.binding_name, e,
             )
 
     async def bootstrap_with_chat_id(self, chat_id: str) -> None:
