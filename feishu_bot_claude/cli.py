@@ -76,6 +76,7 @@ def render_event(event: ResponseEvent) -> str:
 
 
 import os
+import subprocess
 import sys
 
 import click
@@ -84,6 +85,29 @@ DEFAULT_SOCKET = Path(os.environ.get(
     "FEISHU_BOT_CLAUDE_SOCKET",
     Path.home() / ".feishu-bot-claude" / "control.sock",
 ))
+
+
+def _open_url_in_browser(url: str) -> bool:
+    """Fire-and-forget open of a URL in the user's default browser.
+
+    Returns True if the opener command was successfully launched.
+    Silent on failure — caller can still display the URL for manual open.
+    """
+    if not url or not url.startswith("http"):
+        return False
+    if os.environ.get("FEISHU_BOT_CLAUDE_NO_AUTO_OPEN"):
+        return False
+    opener = "open" if sys.platform == "darwin" else "xdg-open"
+    try:
+        subprocess.Popen(
+            [opener, url],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            stdin=subprocess.DEVNULL,
+        )
+        return True
+    except (FileNotFoundError, OSError):
+        return False
 
 
 def _print_events_sync(socket_path: Path, op: str, args: dict) -> int:
@@ -97,6 +121,10 @@ def _print_events_sync(socket_path: Path, op: str, args: dict) -> int:
                 rendered = render_event(event)
                 if rendered:
                     click.echo(rendered)
+                # Auto-open browser when the daemon emits a QR + URL.
+                if isinstance(event, QRCodeEvent):
+                    if _open_url_in_browser(event.url):
+                        click.echo("  (浏览器已自动打开;若没弹出请手动点击上方 URL)")
                 if isinstance(event, ResultEvent) and not event.ok:
                     final_ok = False
         except ConnectionRefusedError:
