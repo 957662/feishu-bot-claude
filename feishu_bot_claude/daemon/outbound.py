@@ -30,6 +30,7 @@ class OutboundPipeline:
         lark: LarkCli,
         bucket: TokenBucket,
         render_style: str = "rich",
+        state_path: Path | None = None,
     ) -> None:
         self._jsonl_path = Path(jsonl_path)
         self._chat_id = chat_id
@@ -38,6 +39,7 @@ class OutboundPipeline:
         self._lark = lark
         self._bucket = bucket
         self._render_style = render_style
+        self._state_path = Path(state_path) if state_path else None
         self._current_turn: Turn | None = None
 
     async def process_backlog(self) -> None:
@@ -115,12 +117,22 @@ class OutboundPipeline:
         Sets the discovered chat_id and replays the FULL Claude jsonl history
         into that chat. Subsequent jsonl events stream normally via
         process_backlog calls from the orchestrator's outbound loop.
+
+        chat_id is persisted BEFORE replay so a partial-replay failure doesn't
+        lose the bootstrap state.
         """
         if not chat_id or chat_id == self._state.chat_id:
             return  # idempotent
         self._state.chat_id = chat_id
-        # Reset replay markers so process_backlog re-reads from byte 0.
         self._state.jsonl_offset = 0
         self._state.reset_current_turn()
         self._current_turn = None
+        # Persist chat_id immediately so a crash during replay still leaves
+        # the binding bootstrapped. The orchestrator's outbound loop will
+        # save again after each successful replay batch.
+        if self._state_path is not None:
+            try:
+                self._state.save(self._state_path)
+            except Exception:
+                pass  # best-effort
         await self.process_backlog()

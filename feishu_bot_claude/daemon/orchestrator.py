@@ -90,6 +90,7 @@ class Orchestrator:
             lark=lark,
             bucket=bucket,
             render_style=cfg.render_style,
+            state_path=state_path,
         )
         # Wire inbound's chat_id discovery to outbound's bootstrap.
         # When the user sends their first message to the bot in Feishu, the

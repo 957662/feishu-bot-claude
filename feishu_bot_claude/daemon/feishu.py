@@ -169,12 +169,36 @@ class RealLarkCli(LarkCli):
     def _common_args(self) -> list[str]:
         return ["--as", "bot"] if self._as_bot else []
 
+    def _extract_message_id(self, out: str) -> str:
+        """lark-cli emits a result JSON object; message_id may be nested under `data`."""
+        for line in reversed(out.strip().splitlines()):
+            line = line.strip()
+            if not line.startswith("{"):
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            # Try common shapes
+            for path in (("message_id",), ("data", "message_id"), ("data", "messageId"), ("messageId",)):
+                node = payload
+                ok = True
+                for k in path:
+                    if isinstance(node, dict) and k in node:
+                        node = node[k]
+                    else:
+                        ok = False
+                        break
+                if ok and isinstance(node, str) and node:
+                    return node
+        raise RuntimeError(f"could not extract message_id from lark-cli output: {out!r}")
+
     async def send_text(self, chat_id: str, text: str, idempotency_key: str | None = None) -> str:
+        # lark-cli `im +messages-send` flags: --text auto-wraps as JSON.
         args = [
             "im", "+messages-send",
             *self._common_args(),
             "--chat-id", chat_id,
-            "--type", "text",
             "--text", text,
         ]
         if idempotency_key:
@@ -182,30 +206,23 @@ class RealLarkCli(LarkCli):
         out, code = await self._run_raw(args, timeout=30.0)
         if code != 0:
             raise RuntimeError(f"lark-cli im +messages-send failed (exit {code}): {out!r}")
-        try:
-            payload = json.loads(out.strip().splitlines()[-1])
-            return payload["message_id"]
-        except (json.JSONDecodeError, KeyError, IndexError) as e:
-            raise RuntimeError(f"could not extract message_id from lark-cli output: {out!r}") from e
+        return self._extract_message_id(out)
 
     async def send_card(self, chat_id: str, card: dict, idempotency_key: str | None = None) -> str:
+        # Correct flags: --msg-type interactive + --content <card-json>
         args = [
             "im", "+messages-send",
             *self._common_args(),
             "--chat-id", chat_id,
-            "--type", "interactive",
-            "--card", json.dumps(card, ensure_ascii=False),
+            "--msg-type", "interactive",
+            "--content", json.dumps(card, ensure_ascii=False),
         ]
         if idempotency_key:
             args += ["--idempotency-key", idempotency_key]
         out, code = await self._run_raw(args, timeout=30.0)
         if code != 0:
             raise RuntimeError(f"lark-cli send_card failed (exit {code}): {out!r}")
-        try:
-            payload = json.loads(out.strip().splitlines()[-1])
-            return payload["message_id"]
-        except (json.JSONDecodeError, KeyError, IndexError) as e:
-            raise RuntimeError(f"could not extract message_id: {out!r}") from e
+        return self._extract_message_id(out)
 
     async def update_card(self, message_id: str, card: dict) -> None:
         args = [
