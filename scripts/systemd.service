@@ -4,6 +4,7 @@ After=network.target
 
 [Service]
 Type=simple
+Environment="PATH=/opt/homebrew/bin:/usr/local/bin:%h/.local/bin:/usr/bin:/bin:/usr/sbin:/sbin"
 ExecStart=__PYTHON__ -m feishu_bot_claude daemon
 Restart=on-failure
 RestartSec=5

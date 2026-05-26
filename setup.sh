@@ -55,6 +55,36 @@ install_python_pkg() {
     pip install --quiet -e ".[dev]"
 }
 
+# Pick a global bin directory that's on most users' PATH.
+# Apple Silicon Homebrew → /opt/homebrew/bin
+# Intel Homebrew / Linux → /usr/local/bin
+# Last resort → ~/.local/bin (usually on PATH from .zshrc/.bashrc)
+global_bin_dir() {
+    for d in /opt/homebrew/bin /usr/local/bin; do
+        if [ -d "$d" ] && [ -w "$d" ]; then
+            echo "$d"
+            return 0
+        fi
+    done
+    mkdir -p "$HOME/.local/bin"
+    echo "$HOME/.local/bin"
+}
+
+install_global_symlink() {
+    local target="$SCRIPT_DIR/.venv/bin/feishu-bot-claude"
+    local bin_dir; bin_dir="$(global_bin_dir)"
+    local link="$bin_dir/feishu-bot-claude"
+    if [ ! -x "$target" ]; then
+        echo "WARN: $target not found; skipping symlink" >&2
+        return
+    fi
+    ln -sf "$target" "$link"
+    echo "[ok] symlink: $link → $target"
+    if ! command -v feishu-bot-claude >/dev/null 2>&1; then
+        echo "WARN: $link is not on your PATH. Add $bin_dir to PATH in your shell rc." >&2
+    fi
+}
+
 install_slash_commands() {
     bash scripts/install-commands.sh
 }
@@ -114,6 +144,7 @@ action_install() {
     need_cmd python3 node tmux
     ensure_lark_cli
     install_python_pkg
+    install_global_symlink
     install_slash_commands
     install_service
     wait_for_socket || true
@@ -138,6 +169,14 @@ action_uninstall() {
             systemctl --user daemon-reload 2>/dev/null || true
             ;;
     esac
+    # Remove the global symlink (only if it points at our venv)
+    for d in /opt/homebrew/bin /usr/local/bin "$HOME/.local/bin"; do
+        local link="$d/feishu-bot-claude"
+        if [ -L "$link" ] && [[ "$(readlink "$link")" == *"feishu-bot-claude/.venv/bin/feishu-bot-claude"* ]]; then
+            rm -f "$link"
+            echo "[ok] removed symlink: $link"
+        fi
+    done
     rm -f "$HOME/.feishu-bot-claude/control.sock"
     echo "✅ Daemon stopped and service files removed."
     echo "Bindings preserved at: $HOME/.feishu-bot-claude/bindings.toml"
@@ -153,13 +192,23 @@ action_update() {
 }
 
 action_doctor() {
-    echo "[check] python3:       $(command -v python3 || echo MISSING)"
-    echo "[check] tmux:          $(command -v tmux || echo MISSING)"
-    echo "[check] node:          $(command -v node || echo MISSING)"
-    echo "[check] lark-cli:      $(command -v lark-cli || echo MISSING)"
-    echo "[check] claude:        $(command -v claude || echo MISSING)"
-    echo "[check] socket:        $([ -S "$HOME/.feishu-bot-claude/control.sock" ] && echo OK || echo MISSING)"
-    echo "[check] bindings.toml: $([ -f "$HOME/.feishu-bot-claude/bindings.toml" ] && echo OK || echo NONE)"
+    echo "[check] python3:           $(command -v python3 || echo MISSING)"
+    echo "[check] tmux:              $(command -v tmux || echo MISSING)"
+    echo "[check] node:              $(command -v node || echo MISSING)"
+    echo "[check] lark-cli:          $(command -v lark-cli || echo MISSING)"
+    echo "[check] claude:            $(command -v claude || echo MISSING)"
+    echo "[check] feishu-bot-claude: $(command -v feishu-bot-claude || echo 'MISSING (run ./setup.sh install)')"
+    echo "[check] socket:            $([ -S "$HOME/.feishu-bot-claude/control.sock" ] && echo OK || echo MISSING)"
+    echo "[check] bindings.toml:     $([ -f "$HOME/.feishu-bot-claude/bindings.toml" ] && echo OK || echo NONE)"
+    # Daemon must be able to find lark-cli + tmux on its own PATH
+    local plist="$HOME/Library/LaunchAgents/com.qingyun.feishu-bot-claude.plist"
+    if [ -f "$plist" ]; then
+        if grep -q "EnvironmentVariables" "$plist"; then
+            echo "[check] launchd PATH env:  OK"
+        else
+            echo "[check] launchd PATH env:  MISSING (re-run ./setup.sh install to fix)"
+        fi
+    fi
     if [ -S "$HOME/.feishu-bot-claude/control.sock" ]; then
         # shellcheck source=/dev/null
         [ -f .venv/bin/activate ] && source .venv/bin/activate
