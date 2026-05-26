@@ -97,3 +97,21 @@ def test_macos_keychain_delete_missing_is_noop(mock_run):
     mock_run.return_value = _completed(44)
     store = MacOSKeychainStore(service_prefix="feishu-bot-claude")
     store.delete("missing")  # no raise
+
+
+@patch("feishu_bot_claude.config.keychain.subprocess.run")
+def test_macos_keychain_put_raises_on_error(mock_run):
+    """MacOSKeychainStore.put raises RuntimeError on non-zero exit."""
+    mock_run.return_value = _completed(1, stderr="permission denied")
+    store = MacOSKeychainStore(service_prefix="feishu-bot-claude")
+    with pytest.raises(RuntimeError, match="keychain put failed"):
+        store.put("foo-bot.app_secret", "s3cret")
+
+
+@patch("feishu_bot_claude.config.keychain.subprocess.run")
+def test_macos_keychain_delete_raises_on_non_zero_non_44(mock_run):
+    """MacOSKeychainStore.delete raises RuntimeError on exit code that is not 0 or 44."""
+    mock_run.return_value = _completed(1, stderr="permission denied")
+    store = MacOSKeychainStore(service_prefix="feishu-bot-claude")
+    with pytest.raises(RuntimeError, match="keychain delete failed"):
+        store.delete("foo-bot.app_secret")
