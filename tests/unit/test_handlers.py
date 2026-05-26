@@ -151,3 +151,70 @@ async def test_handle_start_unknown_cwd_fails(tmp_path):
         events.append(ev)
     assert events[0].ok is False
     assert "no binding" in events[0].error.lower()
+
+
+from feishu_bot_claude.daemon.handlers import (
+    handle_bind_with_orchestrator,
+    handle_unbind_with_orchestrator,
+)
+from feishu_bot_claude.config.keychain import InMemoryKeychainStore
+
+
+async def _fake_auth_runner():
+    for line in [
+        "===QR===",
+        "█",
+        "===QR===",
+        "URL: https://open.feishu.cn/app/foo/qr",
+        '{"app_id":"cli_test","app_secret":"sec_test"}',
+    ]:
+        yield line + "\n"
+
+
+@pytest.mark.asyncio
+async def test_handle_bind_creates_binding(tmp_path):
+    store = BindingStore(tmp_path / "bindings.toml")
+    keychain = InMemoryKeychainStore()
+
+    events = []
+    async for ev in handle_bind_with_orchestrator(
+        args={"name": "foo-bot", "cwd": str(tmp_path / "proj")},
+        store=store,
+        keychain=keychain,
+        auth_runner_factory=lambda: _fake_auth_runner(),
+        menu_pusher=None,
+        data_dir=tmp_path,
+    ):
+        events.append(ev)
+
+    assert any(e.__class__.__name__ == "QRCodeEvent" for e in events)
+    result = next(e for e in events if e.__class__.__name__ == "ResultEvent")
+    assert result.ok is True
+    assert "foo-bot" in result.data["name"]
+
+    binding = store.find_by_name("foo-bot")
+    assert binding is not None
+    assert binding.feishu_app_id == "cli_test"
+    assert keychain.get(binding.secret_ref) == "sec_test"
+
+
+@pytest.mark.asyncio
+async def test_handle_unbind_removes_binding_and_secret(tmp_path):
+    store = BindingStore(tmp_path / "bindings.toml")
+    keychain = InMemoryKeychainStore()
+    cfg = _example_config(name="foo-bot")
+    store.add(cfg)
+    keychain.put(cfg.secret_ref, "the-secret")
+
+    events = []
+    async for ev in handle_unbind_with_orchestrator(
+        args={"name": "foo-bot"},
+        store=store,
+        keychain=keychain,
+    ):
+        events.append(ev)
+
+    result = next(e for e in events if e.__class__.__name__ == "ResultEvent")
+    assert result.ok is True
+    assert store.find_by_name("foo-bot") is None
+    assert keychain.get(cfg.secret_ref) is None

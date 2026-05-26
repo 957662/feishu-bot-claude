@@ -118,3 +118,113 @@ async def handle_stop_with_orchestrator(args: dict, orchestrator: Orchestrator) 
     except KeyError as e:
         yield ResultEvent(ok=False, data=None, error=str(e))
     yield DoneEvent()
+
+
+from datetime import datetime, timezone
+
+from feishu_bot_claude.config.binding import BindingConfig
+from feishu_bot_claude.config.keychain import KeychainStore
+from feishu_bot_claude.daemon.auth import bot_new
+from feishu_bot_claude.daemon.menu import push_menu_with_fallback
+from feishu_bot_claude.menu_template import build_menu_json
+from feishu_bot_claude.proto import LogEvent, ProgressEvent, QRCodeEvent
+
+
+async def handle_bind_with_orchestrator(
+    args: dict,
+    store: BindingStore,
+    keychain: KeychainStore,
+    auth_runner_factory,
+    menu_pusher,
+    data_dir,
+) -> AsyncIterator[ResponseEvent]:
+    name = args.get("name", "")
+    cwd = args.get("cwd", "")
+    if not name or not cwd:
+        yield ResultEvent(ok=False, data=None, error="bind requires name and cwd")
+        yield DoneEvent()
+        return
+
+    if store.find_by_cwd(cwd) is not None:
+        yield ResultEvent(ok=False, data=None, error=f"cwd already bound: {cwd}")
+        yield DoneEvent()
+        return
+    if store.find_by_name(name) is not None:
+        yield ResultEvent(ok=False, data=None, error=f"name already exists: {name}")
+        yield DoneEvent()
+        return
+
+    streamed: list = []
+
+    async def _capture(event: dict) -> None:
+        streamed.append(event)
+
+    yield LogEvent(level="info", msg="Starting Feishu OAuth flow (扫码新建 App)...")
+    try:
+        creds = await bot_new(runner=auth_runner_factory(), on_event=_capture)
+    except RuntimeError as e:
+        yield ResultEvent(ok=False, data=None, error=f"OAuth failed: {e}")
+        yield DoneEvent()
+        return
+
+    for ev in streamed:
+        if ev["type"] == "qrcode":
+            yield QRCodeEvent(ascii=ev["ascii"], url=ev.get("url", ""))
+        elif ev["type"] == "log":
+            yield LogEvent(level=ev.get("level", "info"), msg=ev["msg"])
+        elif ev["type"] == "progress":
+            yield ProgressEvent(value=ev.get("value", 0.0), msg=ev.get("msg", ""))
+
+    yield LogEvent(level="info", msg=f"App created: {creds.app_id}")
+
+    secret_ref = f"feishu-bot-claude.{name}.app_secret"
+    keychain.put(secret_ref, creds.app_secret)
+
+    from pathlib import Path
+    binding = BindingConfig(
+        name=name,
+        project_dir=cwd,
+        tmux_session=f"claude-{name}",
+        feishu_app_id=creds.app_id,
+        secret_ref=secret_ref,
+        created_at=datetime.now(timezone.utc),
+    )
+    store.add(binding)
+
+    if menu_pusher is not None:
+        menu_json = build_menu_json()
+        menu_result = await push_menu_with_fallback(
+            lark_menu=menu_pusher,
+            app_id=creds.app_id,
+            menu_json=menu_json,
+            fallback_dir=Path(data_dir) / "menus",
+            binding_name=name,
+        )
+        if menu_result.method == "api":
+            yield LogEvent(level="info", msg="Menu pushed via lark-cli API.")
+        else:
+            yield LogEvent(level="warn", msg=f"Menu API unsupported; JSON written to {menu_result.fallback_path}.")
+
+    yield ResultEvent(
+        ok=True,
+        data={"name": name, "app_id": creds.app_id, "next": "/bot-start"},
+        error=None,
+    )
+    yield DoneEvent()
+
+
+async def handle_unbind_with_orchestrator(
+    args: dict,
+    store: BindingStore,
+    keychain: KeychainStore,
+) -> AsyncIterator[ResponseEvent]:
+    name = args.get("name", "")
+    binding = store.find_by_name(name)
+    if binding is None:
+        yield ResultEvent(ok=False, data=None, error=f"no binding named {name!r}")
+        yield DoneEvent()
+        return
+    store.remove(name)
+    keychain.delete(binding.secret_ref)
+    yield ResultEvent(ok=True, data={"removed": name}, error=None)
+    yield DoneEvent()
