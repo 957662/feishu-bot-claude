@@ -91,13 +91,26 @@ class Orchestrator:
             bucket=bucket,
             render_style=cfg.render_style,
         )
+        # Wire inbound's chat_id discovery to outbound's bootstrap.
+        # When the user sends their first message to the bot in Feishu, the
+        # inbound pipeline captures the chat_id, then calls this callback
+        # which (1) sets outbound's chat_id and (2) replays the full Claude
+        # jsonl history into that chat.
+        def _on_chat_discovered(chat_id: str):
+            return outbound.bootstrap_with_chat_id(chat_id)
+
         inbound = InboundPipeline(
             tmux_session=cfg.tmux_session,
             tmux=tmux,
             lark=lark,
+            allow_users=set(cfg.allow_users) if cfg.allow_users else None,
+            max_message_length=cfg.max_message_length,
+            on_chat_id_discovered=_on_chat_discovered,
         )
 
-        # Initial backlog process
+        # Initial backlog process. If chat_id is already known from a prior
+        # bootstrap (persisted in state), this will send/update cards. If not,
+        # _send_or_update silently skips and replay waits for first message.
         await outbound.process_backlog()
 
         running = RunningBinding(config=cfg, state=state, outbound=outbound, inbound=inbound)

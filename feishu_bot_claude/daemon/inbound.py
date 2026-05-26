@@ -63,12 +63,28 @@ class InboundPipeline:
     async def _handle_message(self, event: dict) -> None:
         msg = event.get("event", {}).get("message", {})
         sender = event.get("event", {}).get("sender", {}).get("sender_id", {}).get("open_id", "")
-        # Auto-discover chat_id on first message
+
+        # Auto-discover chat_id on first message. This is the BOOTSTRAP message —
+        # the user sends "hi" (or anything) to start the mirror. We consume it:
+        # capture chat_id, trigger backlog replay, but do NOT forward it to Claude.
+        is_bootstrap = False
         if not self._chat_id_seen:
             chat_id = msg.get("chat_id", "")
-            if chat_id and self._on_chat_id_discovered is not None:
+            if chat_id:
                 self._chat_id_seen = True
-                self._on_chat_id_discovered(chat_id)
+                is_bootstrap = True
+                if self._on_chat_id_discovered is not None:
+                    result = self._on_chat_id_discovered(chat_id)
+                    # Callback may return a coroutine (e.g. outbound.bootstrap_with_chat_id)
+                    import asyncio as _asyncio
+                    if _asyncio.iscoroutine(result):
+                        await result
+
+        if is_bootstrap:
+            # Bootstrap message is consumed — DO NOT forward to Claude.
+            logger.info("bootstrap message received; chat_id captured, history replay triggered")
+            return
+
         if self._allow_users is not None and sender not in self._allow_users:
             logger.info("dropping message from non-whitelisted sender %s", sender)
             return

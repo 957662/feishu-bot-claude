@@ -15,6 +15,7 @@ class BindingRuntimeState:
     current_turn_card_id: str | None = None
     jsonl_offset: int = 0
     last_event_uuid: str | None = None
+    chat_id: str = ""  # discovered from first inbound message; empty = bootstrap pending
 
     def set_current_turn_card(self, message_id: str) -> None:
         self.current_turn_card_id = message_id
@@ -32,6 +33,7 @@ class BindingRuntimeState:
             "current_turn_card_id": self.current_turn_card_id,
             "jsonl_offset": self.jsonl_offset,
             "last_event_uuid": self.last_event_uuid,
+            "chat_id": self.chat_id,
         }
         tmp = path.with_suffix(path.suffix + ".tmp")
         tmp.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
@@ -47,4 +49,5 @@ class BindingRuntimeState:
             current_turn_card_id=data.get("current_turn_card_id"),
             jsonl_offset=data.get("jsonl_offset", 0),
             last_event_uuid=data.get("last_event_uuid"),
+            chat_id=data.get("chat_id", ""),
         )

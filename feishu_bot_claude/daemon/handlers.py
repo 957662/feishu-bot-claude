@@ -98,11 +98,20 @@ async def handle_start_with_orchestrator(args: dict, orchestrator: Orchestrator)
     jsonl_path = Path(jsonl_path_str) if jsonl_path_str else None
     try:
         running = await orchestrator.start_binding(cwd=cwd, jsonl_path=jsonl_path)
-        yield ResultEvent(
-            ok=True,
-            data={"name": running.config.name, "tmux_session": running.config.tmux_session},
-            error=None,
-        )
+        bootstrap_done = bool(running.state.chat_id)
+        data = {
+            "name": running.config.name,
+            "tmux_session": running.config.tmux_session,
+            "chat_id": running.state.chat_id,
+            "bootstrap_done": bootstrap_done,
+        }
+        if not bootstrap_done:
+            data["next"] = (
+                f"Open Feishu app → search for the bot bound to '{running.config.name}' "
+                f"(app_id {running.config.feishu_app_id}) → send any message to bootstrap. "
+                f"Your entire current Claude conversation will load into that chat automatically."
+            )
+        yield ResultEvent(ok=True, data=data, error=None)
     except KeyError as e:
         yield ResultEvent(ok=False, data=None, error=str(e))
     except RuntimeError as e:

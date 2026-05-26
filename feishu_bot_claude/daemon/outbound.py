@@ -77,8 +77,17 @@ class OutboundPipeline:
         self._current_turn.assistant_events.append(event)
         await self._send_or_update()
 
+    def _effective_chat_id(self) -> str:
+        """chat_id source of truth: state (persisted) overrides constructor arg."""
+        return self._state.chat_id or self._chat_id
+
     async def _send_or_update(self) -> None:
         if self._current_turn is None:
+            return
+        chat_id = self._effective_chat_id()
+        if not chat_id:
+            # No bootstrap message received yet — skip sending. The jsonl_offset
+            # advance will be reset when chat_id arrives so we replay everything.
             return
         card = render_turn_to_card(
             self._current_turn,
@@ -89,7 +98,7 @@ class OutboundPipeline:
         if self._state.current_turn_card_id is None:
             user_uuid = self._current_turn.user_event.uuid if self._current_turn.user_event else "orphan"
             msg_id = await self._lark.send_card(
-                chat_id=self._chat_id,
+                chat_id=chat_id,
                 card=card,
                 idempotency_key=f"{self._state.binding_name}-{user_uuid}",
             )
@@ -99,3 +108,19 @@ class OutboundPipeline:
                 message_id=self._state.current_turn_card_id,
                 card=card,
             )
+
+    async def bootstrap_with_chat_id(self, chat_id: str) -> None:
+        """Called when the user sends their first message to the bot.
+
+        Sets the discovered chat_id and replays the FULL Claude jsonl history
+        into that chat. Subsequent jsonl events stream normally via
+        process_backlog calls from the orchestrator's outbound loop.
+        """
+        if not chat_id or chat_id == self._state.chat_id:
+            return  # idempotent
+        self._state.chat_id = chat_id
+        # Reset replay markers so process_backlog re-reads from byte 0.
+        self._state.jsonl_offset = 0
+        self._state.reset_current_turn()
+        self._current_turn = None
+        await self.process_backlog()
