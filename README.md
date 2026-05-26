@@ -212,9 +212,28 @@ cd ~/project/my-app
 feishu-bot-claude shell --dangerously-skip-permissions
 ```
 
+> ⚠️ **关于 `--dangerously-skip-permissions`(危险!全权限模式)**
+>
+> 这是 Claude Code 官方的"**跳过所有权限确认**"开关。加上它之后:
+> - Claude **不会再**对任何动作弹"是否允许?"的确认对话框
+> - 删文件 / 改文件 / 跑 shell 命令 / 推 git / `curl ... | bash` 全都**直接执行,无任何拦截**
+> - 远程通过飞书发的指令也会被 Claude 直接执行 —— 任何人能给机器人发消息,就能 100% 控制你这台机器
+>
+> **何时可以加**:
+> - ✅ 你在隔离的开发环境 / 临时虚拟机里跑
+> - ✅ 你完全信任飞书侧的接收人(默认只有你自己)
+> - ✅ 你能容忍 Claude 跑飞之后的代价(代码回滚 / 数据恢复)
+>
+> **何时绝对不要加**:
+> - ❌ 在生产机器 / 装着重要数据的个人主力机上
+> - ❌ 飞书机器人聊天框可能被其他人看到或操作(没设 `allow_users` 白名单)
+> - ❌ 你不知道这个标志会做什么的时候 —— 先去掉它,Claude 会每次跑命令前问你
+>
+> 想稳一点就把这个标志删掉,正常跑 `feishu-bot-claude shell` 即可;每次危险操作会在 TUI 里弹确认,你可以在飞书的卡片里看到该提示并通过菜单按钮 / 输入 y/n 来批准。
+
 这条命令会:
 - 创建一个 tmux session 名字叫 `claude-my-app`
-- 在里面启动 `claude --dangerously-skip-permissions`
+- 在里面启动 `claude --dangerously-skip-permissions`(如果你加了这个标志)
 - 你的当前终端就是 attach 到这个 tmux session 的
 
 如果之前已经跑着了,会直接 attach 进去。
