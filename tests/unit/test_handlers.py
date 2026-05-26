@@ -60,3 +60,37 @@ async def test_list_empty_store(tmp_path):
     async for ev in handle_list(args={}, store=store):
         events.append(ev)
     assert events[0].data == {"bindings": []}
+
+
+from feishu_bot_claude.daemon.handlers import (
+    handle_bind,
+    handle_unbind,
+    handle_start,
+    handle_stop,
+    handle_config,
+    handle_status,
+    handle_shell,
+)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("handler", [handle_bind, handle_unbind, handle_start, handle_stop, handle_config, handle_shell])
+async def test_stub_handlers_return_not_implemented(handler):
+    """Each stub handler returns ok=False with 'not yet implemented'."""
+    events = []
+    async for ev in handler(args={}):
+        events.append(ev)
+    assert events[0].ok is False
+    assert "not yet implemented" in events[0].error.lower()
+    assert events[-1] == DoneEvent()
+
+
+@pytest.mark.asyncio
+async def test_status_returns_daemon_info():
+    """status returns ok=True with daemon version + uptime."""
+    events = []
+    async for ev in handle_status(args={}):
+        events.append(ev)
+    assert events[0].ok is True
+    assert "version" in events[0].data
+    assert events[-1] == DoneEvent()

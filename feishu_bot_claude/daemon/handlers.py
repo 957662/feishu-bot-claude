@@ -31,3 +31,57 @@ async def handle_list(args: dict, store: BindingStore) -> AsyncIterator[Response
     bindings = [_binding_summary(b) for b in store.all()]
     yield ResultEvent(ok=True, data={"bindings": bindings}, error=None)
     yield DoneEvent()
+
+
+import time
+
+import feishu_bot_claude
+
+_DAEMON_START_TIME = time.time()
+
+
+async def _not_implemented(op: str) -> AsyncIterator[ResponseEvent]:
+    yield ResultEvent(ok=False, data=None, error=f"{op}: not yet implemented (later phase)")
+    yield DoneEvent()
+
+
+async def handle_bind(args: dict) -> AsyncIterator[ResponseEvent]:
+    async for ev in _not_implemented("bind"):
+        yield ev
+
+
+async def handle_unbind(args: dict) -> AsyncIterator[ResponseEvent]:
+    async for ev in _not_implemented("unbind"):
+        yield ev
+
+
+async def handle_start(args: dict) -> AsyncIterator[ResponseEvent]:
+    async for ev in _not_implemented("start"):
+        yield ev
+
+
+async def handle_stop(args: dict) -> AsyncIterator[ResponseEvent]:
+    async for ev in _not_implemented("stop"):
+        yield ev
+
+
+async def handle_config(args: dict) -> AsyncIterator[ResponseEvent]:
+    async for ev in _not_implemented("config"):
+        yield ev
+
+
+async def handle_shell(args: dict) -> AsyncIterator[ResponseEvent]:
+    async for ev in _not_implemented("shell"):
+        yield ev
+
+
+async def handle_status(args: dict) -> AsyncIterator[ResponseEvent]:
+    yield ResultEvent(
+        ok=True,
+        data={
+            "version": feishu_bot_claude.__version__,
+            "uptime_seconds": int(time.time() - _DAEMON_START_TIME),
+        },
+        error=None,
+    )
+    yield DoneEvent()
