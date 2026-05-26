@@ -15,14 +15,19 @@ if ! command -v claude >/dev/null 2>&1; then
 fi
 
 CWD="${1:-$PWD}"
+shift || true  # drop the cwd arg; remaining "$@" is forwarded to claude
 NAME="claude-$(basename "$CWD")"
 
 cd "$CWD"
 
 if tmux has-session -t "$NAME" 2>/dev/null; then
-    echo "Attaching to existing tmux session: $NAME"
+    if [ "$#" -gt 0 ]; then
+        echo "NOTE: session $NAME already exists; attaching. Extra args ($*) ignored." >&2
+    else
+        echo "Attaching to existing tmux session: $NAME"
+    fi
     exec tmux attach -t "$NAME"
 else
-    echo "Creating tmux session: $NAME"
-    exec tmux new-session -A -s "$NAME" -c "$CWD" claude
+    echo "Creating tmux session: $NAME (claude $*)"
+    exec tmux new-session -A -s "$NAME" -c "$CWD" claude "$@"
 fi
