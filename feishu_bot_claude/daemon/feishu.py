@@ -228,8 +228,13 @@ class RealLarkCli(LarkCli):
 
         env = os.environ.copy()
         env.update(self._extra_env)
+        # IMPORTANT: lark-cli event consume treats stdin EOF as "exit signal".
+        # The daemon inherits launchd's /dev/null stdin → immediate EOF → lark-cli
+        # exits before any event arrives. Pass stdin=PIPE so the child sees an
+        # open stdin held by us, which we never write to or close until we cancel.
         proc = await asyncio.create_subprocess_exec(
             self._binary, *args,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=env,
@@ -247,6 +252,12 @@ class RealLarkCli(LarkCli):
                 except json.JSONDecodeError:
                     continue
         finally:
+            # Close our end of the pipe, then terminate.
+            try:
+                if proc.stdin is not None and not proc.stdin.is_closing():
+                    proc.stdin.close()
+            except Exception:
+                pass
             if proc.returncode is None:
                 proc.terminate()
                 try:
