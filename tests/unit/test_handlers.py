@@ -174,8 +174,14 @@ async def _fake_auth_runner(name):
 
 @pytest.mark.asyncio
 async def test_handle_bind_creates_binding(tmp_path):
+    import asyncio
     store = BindingStore(tmp_path / "bindings.toml")
     keychain = InMemoryKeychainStore()
+
+    class FakeOrchestrator:
+        def __init__(self):
+            self.pending_binds = {}
+    orch = FakeOrchestrator()
 
     events = []
     async for ev in handle_bind_with_orchestrator(
@@ -185,13 +191,23 @@ async def test_handle_bind_creates_binding(tmp_path):
         auth_runner_factory=lambda name: _fake_auth_runner(name),
         menu_pusher=None,
         data_dir=tmp_path,
+        orchestrator=orch,
     ):
         events.append(ev)
 
+    # Handler should yield immediately after the QR appears
     assert any(e.__class__.__name__ == "QRCodeEvent" for e in events)
     result = next(e for e in events if e.__class__.__name__ == "ResultEvent")
     assert result.ok is True
-    assert "foo-bot" in result.data["name"]
+    assert "awaiting_scan" in result.data.get("status", "")
+
+    # Background task should still be running OR just completed
+    # Wait for it to finish (the fake auth runner exits quickly after emitting QR)
+    if "foo-bot" in orch.pending_binds:
+        await orch.pending_binds["foo-bot"]
+
+    # Give any remaining async tasks a chance to complete
+    await asyncio.sleep(0)
 
     binding = store.find_by_name("foo-bot")
     assert binding is not None

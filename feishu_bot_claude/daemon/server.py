@@ -65,6 +65,7 @@ def _build_dispatcher(
                 args, store=store, keychain=keychain,
                 auth_runner_factory=auth_runner_factory,
                 menu_pusher=menu_pusher, data_dir=data_dir,
+                orchestrator=orchestrator,
             ):
                 yield ev
         async def _unbind_with_orch(args):

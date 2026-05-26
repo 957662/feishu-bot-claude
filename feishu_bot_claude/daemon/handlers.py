@@ -168,7 +168,9 @@ async def handle_bind_with_orchestrator(
     auth_runner_factory,
     menu_pusher,
     data_dir,
+    orchestrator=None,  # NEW — for pending_binds dict
 ) -> AsyncIterator[ResponseEvent]:
+    import asyncio
     name = args.get("name", "")
     cwd = args.get("cwd", "")
     if not name or not cwd:
@@ -184,66 +186,89 @@ async def handle_bind_with_orchestrator(
         yield ResultEvent(ok=False, data=None, error=f"name already exists: {name}")
         yield DoneEvent()
         return
-
-    streamed: list = []
-
-    async def _capture(event: dict) -> None:
-        streamed.append(event)
-
-    yield LogEvent(level="info", msg="Starting Feishu OAuth flow (扫码新建 App)...")
-    try:
-        creds = await bot_new(runner=auth_runner_factory(name), on_event=_capture)
-    except RuntimeError as e:
-        yield ResultEvent(ok=False, data=None, error=f"OAuth failed: {e}")
+    if orchestrator is not None and name in orchestrator.pending_binds:
+        yield ResultEvent(ok=False, data=None, error=f"bind for {name!r} already in progress")
         yield DoneEvent()
         return
 
-    for ev in streamed:
-        if ev["type"] == "qrcode":
-            yield QRCodeEvent(ascii=ev["ascii"], url=ev.get("url", ""))
-        elif ev["type"] == "log":
-            yield LogEvent(level=ev.get("level", "info"), msg=ev["msg"])
-        elif ev["type"] == "progress":
-            yield ProgressEvent(value=ev.get("value", 0.0), msg=ev.get("msg", ""))
+    yield LogEvent(level="info", msg="Starting Feishu OAuth flow (扫码新建 App)...")
 
-    # Extract app_id from lark-cli profile config files (lark-cli manages creds internally)
-    feishu_app_id = creds.app_id or _extract_app_id_from_larkcli(name)
-    yield LogEvent(level="info", msg=f"App created: {feishu_app_id}")
+    loop = asyncio.get_event_loop()
+    qr_future: asyncio.Future = loop.create_future()
 
-    secret_ref = f"feishu-bot-claude.{name}.app_secret"
-    # lark-cli manages the real secret internally; store empty string to satisfy data model
-    keychain.put(secret_ref, creds.app_secret)
+    async def on_auth_event(event: dict) -> None:
+        if event.get("type") == "qrcode" and not qr_future.done():
+            qr_future.set_result((event.get("ascii", ""), event.get("url", "")))
 
-    from pathlib import Path
-    binding = BindingConfig(
-        name=name,
-        project_dir=cwd,
-        tmux_session=f"claude-{name}",
-        feishu_app_id=feishu_app_id,
-        secret_ref=secret_ref,
-        created_at=datetime.now(timezone.utc),
-    )
-    store.add(binding)
+    async def background_finish() -> None:
+        from pathlib import Path
+        try:
+            await bot_new(runner=auth_runner_factory(name), on_event=on_auth_event)
+            # bot_new succeeded → user completed scan, lark-cli profile saved
+            app_id = _extract_app_id_from_larkcli(name) or f"larkcli-profile:{name}"
+            secret_ref = f"feishu-bot-claude.{name}.app_secret"
+            try:
+                keychain.put(secret_ref, "")  # lark-cli manages real secret
+            except Exception:
+                pass  # keychain may not be writable in test envs
 
-    if menu_pusher is not None:
-        menu_json = build_menu_json()
-        menu_result = await push_menu_with_fallback(
-            lark_menu=menu_pusher,
-            app_id=feishu_app_id,
-            menu_json=menu_json,
-            fallback_dir=Path(data_dir) / "menus",
-            binding_name=name,
+            binding = BindingConfig(
+                name=name,
+                project_dir=cwd,
+                tmux_session=f"claude-{name}",
+                feishu_app_id=app_id,
+                secret_ref=secret_ref,
+                created_at=datetime.now(timezone.utc),
+            )
+            store.add(binding)
+
+            if menu_pusher is not None:
+                try:
+                    menu_json = build_menu_json()
+                    await push_menu_with_fallback(
+                        lark_menu=menu_pusher,
+                        app_id=app_id,
+                        menu_json=menu_json,
+                        fallback_dir=Path(data_dir) / "menus",
+                        binding_name=name,
+                    )
+                except Exception:
+                    pass  # best-effort
+        finally:
+            if orchestrator is not None:
+                orchestrator.pending_binds.pop(name, None)
+
+    # Launch the background task. NOTE: the task reference is held in pending_binds
+    # so it isn't garbage collected after this handler returns.
+    task = asyncio.create_task(background_finish())
+    if orchestrator is not None:
+        orchestrator.pending_binds[name] = task
+
+    # Wait briefly for the QR URL to appear. lark-cli outputs the QR within ~3-5 seconds.
+    try:
+        ascii_qr, url = await asyncio.wait_for(qr_future, timeout=30.0)
+        yield QRCodeEvent(ascii=ascii_qr, url=url)
+        yield ResultEvent(
+            ok=True,
+            data={
+                "name": name,
+                "url": url,
+                "status": "awaiting_scan",
+                "instructions": "Open the URL above in your browser, scan with Feishu mobile to authorize. Binding will be saved automatically.",
+            },
+            error=None,
         )
-        if menu_result.method == "api":
-            yield LogEvent(level="info", msg="Menu pushed via lark-cli API.")
-        else:
-            yield LogEvent(level="warn", msg=f"Menu API unsupported; JSON written to {menu_result.fallback_path}.")
+    except asyncio.TimeoutError:
+        # Cancel the task — it never produced a URL
+        task.cancel()
+        if orchestrator is not None:
+            orchestrator.pending_binds.pop(name, None)
+        yield ResultEvent(
+            ok=False,
+            data=None,
+            error="OAuth flow did not produce a URL within 30 seconds. Check daemon logs.",
+        )
 
-    yield ResultEvent(
-        ok=True,
-        data={"name": name, "app_id": feishu_app_id, "next": "/bot-start"},
-        error=None,
-    )
     yield DoneEvent()
 
 

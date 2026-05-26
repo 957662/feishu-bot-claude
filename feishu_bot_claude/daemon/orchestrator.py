@@ -47,6 +47,7 @@ class Orchestrator:
         self._data_dir = Path(data_dir)
         self._running: dict[str, RunningBinding] = {}
         self._chat_id_for: dict[str, str] = {}
+        self.pending_binds: dict[str, asyncio.Task] = {}
 
     def set_chat_id(self, binding_name: str, chat_id: str) -> None:
         """Test/wiring helper: tell the orchestrator which chat_id to send to."""
