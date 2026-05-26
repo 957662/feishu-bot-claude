@@ -170,8 +170,20 @@ def config(ctx, cwd, kv):
     sys.exit(_print_events_sync(ctx.obj["socket"], "config", {"cwd": str(cwd), "kv": list(kv)}))
 
 
-@main.command(help="Start tmux + claude shell for current project (Phase 6)")
+@main.command(help="Start tmux + claude shell for current project")
 @click.option("--cwd", default=None, type=click.Path(path_type=Path))
 @click.pass_context
 def shell(ctx, cwd):
-    sys.exit(_print_events_sync(ctx.obj["socket"], "shell", {"cwd": str(cwd) if cwd else os.getcwd()}))
+    """shell doesn't go through the daemon — it's a thin tmux wrapper."""
+    target = cwd or Path(os.getcwd())
+    # Locate the helper script relative to the installed package's repo root
+    pkg_dir = Path(__file__).resolve().parent  # feishu_bot_claude/
+    candidates = [
+        pkg_dir.parent / "scripts" / "feishu-bot-claude-shell",  # editable install
+        pkg_dir.parent.parent / "scripts" / "feishu-bot-claude-shell",
+    ]
+    script = next((p for p in candidates if p.exists()), None)
+    if script is None:
+        click.echo(f"ERROR: shell helper not found in any of: {candidates}", err=True)
+        sys.exit(2)
+    os.execv(str(script), [str(script), str(target)])
