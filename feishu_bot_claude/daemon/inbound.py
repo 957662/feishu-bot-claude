@@ -10,6 +10,13 @@ from feishu_bot_claude.daemon.tmux import Tmux
 
 logger = logging.getLogger(__name__)
 
+# Standard confirmation event_key → tmux keystrokes (for /clear-style Y/N prompts).
+# Orchestrator merges this into its menu_command_map by default.
+DEFAULT_CONFIRM_MAP: dict[str, str] = {
+    "confirm_yes": "y",
+    "confirm_no": "n",
+}
+
 
 class InboundPipeline:
     """Drive `lark-cli event consume`, route each event to tmux or a handler."""
