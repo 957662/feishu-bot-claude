@@ -173,8 +173,12 @@ async def _fake_auth_runner(name):
 
 
 @pytest.mark.asyncio
-async def test_handle_bind_creates_binding(tmp_path):
+async def test_handle_bind_creates_binding(tmp_path, monkeypatch):
     import asyncio
+    from feishu_bot_claude.daemon import handlers as handlers_module
+    # In test env, lark-cli isn't really invoked — stub the extractor.
+    monkeypatch.setattr(handlers_module, "_extract_app_id_from_larkcli", lambda n: f"cli_test_{n}")
+
     store = BindingStore(tmp_path / "bindings.toml")
     keychain = InMemoryKeychainStore()
 
