@@ -46,3 +46,15 @@ def test_render_result_failure_includes_error():
 def test_render_done_returns_empty_string():
     out = render_event(DoneEvent())
     assert out == ""
+
+
+from click.testing import CliRunner
+
+
+def test_main_help_lists_subcommands():
+    from feishu_bot_claude.cli import main
+    runner = CliRunner()
+    result = runner.invoke(main, ["--help"])
+    assert result.exit_code == 0
+    for cmd in ["ping", "list", "bind", "start", "stop", "status", "unbind", "config"]:
+        assert cmd in result.output, f"missing subcommand: {cmd}"

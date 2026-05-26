@@ -9,7 +9,11 @@ description = "Bridge local Claude Code TUI to dedicated Feishu bots"
 requires-python = ">=3.11"
 dependencies = [
     "tomli-w >= 1.0.0",
+    "click >= 8.1.0",
 ]
+
+[project.scripts]
+feishu-bot-claude = "feishu_bot_claude.cli:main"
 
 [project.optional-dependencies]
 dev = [
