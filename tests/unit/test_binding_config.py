@@ -61,3 +61,23 @@ def test_binding_config_rejects_empty_name():
 def test_binding_config_rejects_non_absolute_project_dir():
     with pytest.raises(ValueError, match="project_dir"):
         _example_config(project_dir="relative/path")
+
+
+def test_binding_config_accepts_security_fields():
+    cfg = _example_config(
+        allow_users=["ou_xxx", "ou_yyy"],
+        require_confirm_patterns=[r"rm\s+-rf"],
+        max_message_length=4000,
+        session_idle_timeout_seconds=1800,
+    )
+    assert cfg.allow_users == ["ou_xxx", "ou_yyy"]
+    assert cfg.require_confirm_patterns == [r"rm\s+-rf"]
+    assert cfg.max_message_length == 4000
+
+
+def test_binding_config_defaults_security_empty():
+    cfg = _example_config()
+    assert cfg.allow_users == []
+    assert cfg.require_confirm_patterns == []
+    assert cfg.max_message_length == 8000  # default
+    assert cfg.session_idle_timeout_seconds == 0  # disabled

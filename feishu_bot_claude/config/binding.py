@@ -54,6 +54,10 @@ class BindingConfig:
     event_silent_threshold_ms: int = 60000
     event_dead_threshold_ms: int = 120000
     reconnect_grace_failures: int = 3
+    allow_users: list[str] = field(default_factory=list)
+    require_confirm_patterns: list[str] = field(default_factory=list)
+    max_message_length: int = 8000
+    session_idle_timeout_seconds: int = 0  # 0 = disabled
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __post_init__(self) -> None:
@@ -229,6 +233,10 @@ def _binding_to_dict(b: BindingConfig) -> dict:
         "event_silent_threshold_ms": b.event_silent_threshold_ms,
         "event_dead_threshold_ms": b.event_dead_threshold_ms,
         "reconnect_grace_failures": b.reconnect_grace_failures,
+        "allow_users": list(b.allow_users),
+        "require_confirm_patterns": list(b.require_confirm_patterns),
+        "max_message_length": b.max_message_length,
+        "session_idle_timeout_seconds": b.session_idle_timeout_seconds,
         "created_at": b.created_at,
     }
 
