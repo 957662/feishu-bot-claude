@@ -34,11 +34,10 @@ def test_divider_element():
 
 
 def test_note_element():
+    # Schema 2.0 dropped "note"; we now render notes as small/grey markdown.
     n = build_note("1.2K tokens · 4.3s")
-    assert n == {
-        "tag": "note",
-        "elements": [{"tag": "plain_text", "content": "1.2K tokens · 4.3s"}],
-    }
+    assert n["tag"] == "markdown"
+    assert "1.2K tokens · 4.3s" in n["content"]
 
 
 def test_collapsible_element():
@@ -77,4 +76,4 @@ def test_build_card_combines_elements():
     assert len(elements) == 3
     assert elements[0]["tag"] == "markdown"
     assert elements[1]["tag"] == "hr"
-    assert elements[2]["tag"] == "note"
+    assert elements[2]["tag"] == "markdown"  # build_note → markdown under schema 2.0

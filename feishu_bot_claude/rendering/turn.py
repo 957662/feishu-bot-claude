@@ -19,10 +19,33 @@ class JsonlEvent:
 
     @classmethod
     def from_dict(cls, d: dict) -> JsonlEvent:
+        # Claude jsonl stores message events with `message.content` (Anthropic SDK
+        # shape) OR with `content` at the top level (older / synthetic events).
+        # content itself can be a plain string OR a list of {type,text|...} parts.
+        # Normalize to list-of-dicts so downstream code can iterate safely.
+        msg_obj = d.get("message")
+        if isinstance(msg_obj, dict):
+            raw_content = msg_obj.get("content", d.get("content", []))
+            role = msg_obj.get("role", d.get("role", ""))
+        else:
+            raw_content = d.get("content", [])
+            role = d.get("role", "")
+        if isinstance(raw_content, str):
+            normalized = [{"type": "text", "text": raw_content}]
+        elif isinstance(raw_content, list):
+            normalized = []
+            for part in raw_content:
+                if isinstance(part, dict):
+                    normalized.append(part)
+                elif isinstance(part, str):
+                    normalized.append({"type": "text", "text": part})
+                # else skip unknown shapes
+        else:
+            normalized = []
         return cls(
-            role=d.get("role", ""),
+            role=role,
             uuid=d.get("uuid", ""),
-            content=d.get("content", []),
+            content=normalized,
             raw=d,
         )
 
@@ -77,6 +100,17 @@ def group_into_turns(events: Iterable[JsonlEvent]) -> list[Turn]:
 from feishu_bot_claude.rendering.card import build_card, build_header, build_markdown, build_note
 from feishu_bot_claude.rendering.tools import render_tool_block
 
+# Feishu card limits (see tools.py): cap individual markdown elements and
+# total element count to stay under the per-message budget (~30KB / ~50 elements).
+MARKDOWN_CHAR_LIMIT = 4000
+MAX_ELEMENTS_PER_CARD = 40
+
+
+def _truncate(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + f"\n…(截断 {len(text) - limit} 字符)…"
+
 
 def render_turn_to_card(turn: Turn, project_name: str = "project", render_style: str = "rich") -> dict:
     """Render a Turn to a Feishu interactive card JSON."""
@@ -84,7 +118,7 @@ def render_turn_to_card(turn: Turn, project_name: str = "project", render_style:
     for event in turn.assistant_events:
         for part in event.content:
             if part.get("type") == "text" and part.get("text"):
-                elements.append(build_markdown(part["text"]))
+                elements.append(build_markdown(_truncate(part["text"], MARKDOWN_CHAR_LIMIT)))
             elif part.get("type") == "tool_use":
                 tool_use = part
                 tool_result = None
@@ -99,6 +133,13 @@ def render_turn_to_card(turn: Turn, project_name: str = "project", render_style:
 
     total_in = sum(e.raw.get("usage", {}).get("input_tokens", 0) for e in turn.assistant_events)
     total_out = sum(e.raw.get("usage", {}).get("output_tokens", 0) for e in turn.assistant_events)
+
+    # Cap total elements; reserve 1 slot for the truncation note + 1 for usage.
+    if len(elements) > MAX_ELEMENTS_PER_CARD - 2:
+        dropped = len(elements) - (MAX_ELEMENTS_PER_CARD - 2)
+        elements = elements[:MAX_ELEMENTS_PER_CARD - 2]
+        elements.append(build_note(f"…省略 {dropped} 个工具调用/段落…"))
+
     if total_in or total_out:
         elements.append(build_note(f"{total_in}+{total_out} tokens"))
 

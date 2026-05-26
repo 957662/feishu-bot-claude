@@ -19,8 +19,31 @@ def build_header(title: str, template: Template = "purple") -> dict:
     }
 
 
+def _strip_markdown_tables(content: str) -> str:
+    """Feishu auto-converts `|...|...|` blocks into table elements with a hard
+    per-card cap (~3). Long assistant outputs blow past it and the whole card
+    is rejected (code 11310: card table number over limit). We escape pipe
+    characters OUTSIDE fenced code blocks so they render as literal `|` text.
+    """
+    lines = content.split("\n")
+    in_code_fence = False
+    out: list[str] = []
+    for line in lines:
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_code_fence = not in_code_fence
+            out.append(line)
+            continue
+        if in_code_fence:
+            out.append(line)
+            continue
+        # outside code: replace pipes with their escaped form.
+        out.append(line.replace("|", "\\|"))
+    return "\n".join(out)
+
+
 def build_markdown(content: str) -> dict:
-    return {"tag": "markdown", "content": content}
+    return {"tag": "markdown", "content": _strip_markdown_tables(content)}
 
 
 def build_divider() -> dict:
@@ -28,10 +51,10 @@ def build_divider() -> dict:
 
 
 def build_note(content: str) -> dict:
-    return {
-        "tag": "note",
-        "elements": [{"tag": "plain_text", "content": content}],
-    }
+    # Feishu schema 2.0 dropped the "note" tag. Render as small/grey markdown
+    # to preserve the visual hint (token usage, truncation marker, etc.) without
+    # triggering "unsupported tag note" rejections.
+    return {"tag": "markdown", "content": f"<font color='grey'>{content}</font>"}
 
 
 def build_collapsible(summary: str, body_markdown: str, expanded: bool = False) -> dict:

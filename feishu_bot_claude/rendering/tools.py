@@ -85,11 +85,19 @@ def _tool_detail(tool_use: dict, tool_result: dict | None) -> str:
     return ""
 
 
+# Feishu interactive card limits (per testing 2026-05):
+#   - Total message body ≤ 30KB (code 230025 if exceeded)
+#   - Single element body cannot exceed ~8KB (code 11310 "element exceeds the limit")
+#   - Total elements per card cannot exceed ~50 (code 11310 "element/table number over limit")
+# We cap each tool block to keep individual elements small AND keep total chars bounded.
+TOOL_BLOCK_CHAR_LIMIT = 4000  # safe under 8KB even with multibyte chars
+
+
 def render_tool_block(
     tool_use: dict,
     tool_result: dict | None,
     render_style: RenderStyle,
-    preview_lines: int = 20,
+    preview_lines: int = 60,
 ) -> dict | None:
     """Return a collapsible card block for one tool call, or None if minimal."""
     if render_style == "minimal":
@@ -98,6 +106,13 @@ def render_tool_block(
     title = _format_title(tool_use, tool_result)
     body = _build_body(tool_use, tool_result, render_style, preview_lines)
     return build_collapsible(summary=title, body_markdown=body, expanded=False)
+
+
+def _truncate_to_chars(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    head = text[:limit]
+    return head + f"\n…(截断 {len(text) - limit} 字符)…"
 
 
 def _build_body(tool_use: dict, tool_result: dict | None, render_style: RenderStyle, preview_lines: int) -> str:
@@ -121,7 +136,8 @@ def _build_body(tool_use: dict, tool_result: dict | None, render_style: RenderSt
         parts.append(f"```\n{head}\n```\n_...省略 {len(lines) - preview_lines} 行..._")
     elif content:
         parts.append(f"```\n{content}\n```")
-    return "\n\n".join(parts) if parts else "_(empty)_"
+    body = "\n\n".join(parts) if parts else "_(empty)_"
+    return _truncate_to_chars(body, TOOL_BLOCK_CHAR_LIMIT)
 
 
 def summarize_tool_result(tool_result: dict | None) -> str:

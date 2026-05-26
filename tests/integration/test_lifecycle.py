@@ -41,6 +41,9 @@ async def test_full_lifecycle_with_fakes(tmp_path):
         lark_factory=lambda c: lark,
         data_dir=tmp_path,
     )
+    # Outbound only sends cards once a chat_id is known (set by the bootstrap
+    # message in real flow). Inject one here so the test exercises sends.
+    orchestrator.set_chat_id("myproject-bot", "oc_test_chat")
 
     # Start
     await orchestrator.start_binding(cwd=str(project_dir), jsonl_path=jsonl)

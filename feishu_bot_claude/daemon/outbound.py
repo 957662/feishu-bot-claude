@@ -43,7 +43,12 @@ class OutboundPipeline:
         self._current_turn: Turn | None = None
 
     async def process_backlog(self) -> None:
-        """Read new bytes from jsonl past current offset; render any new turns."""
+        """Read new bytes from jsonl past current offset; render any new turns.
+
+        Strategy: accumulate all events for a turn FIRST, send ONCE per turn
+        when the turn closes (user event arrives, or stream ends). Avoids
+        sending dozens of intermediate "in-progress" cards per turn.
+        """
         if not self._jsonl_path.exists():
             return
         size = self._jsonl_path.stat().st_size
@@ -66,9 +71,13 @@ class OutboundPipeline:
                 logger.warning("skipping malformed jsonl line: %r", line[:80])
                 continue
             await self._handle_event(event)
+        # End of batch: flush the final turn (no following user event to trigger it)
+        await self._flush_current_turn()
 
     async def _handle_event(self, event: JsonlEvent) -> None:
         if event.role == "user" and not event.has_only_tool_results():
+            # User event closes the previous turn → flush it.
+            await self._flush_current_turn()
             self._current_turn = Turn(user_event=event)
             self._state.reset_current_turn()
             return
@@ -77,32 +86,38 @@ class OutboundPipeline:
             self._current_turn = Turn(user_event=None)
 
         self._current_turn.assistant_events.append(event)
-        await self._send_or_update()
 
-    def _effective_chat_id(self) -> str:
-        """chat_id source of truth: state (persisted) overrides constructor arg."""
-        return self._state.chat_id or self._chat_id
-
-    async def _send_or_update(self) -> None:
+    async def _flush_current_turn(self) -> None:
+        """Render and send the current turn as a single card. No-op on empty."""
         if self._current_turn is None:
             return
         chat_id = self._effective_chat_id()
         if not chat_id:
-            # No bootstrap message received yet — skip sending.
             return
         card = render_turn_to_card(
             self._current_turn,
             project_name=self._project_name,
             render_style=self._render_style,
         )
+        # Skip turns with no meaningful body content (e.g. system meta turns)
+        if not card.get("body", {}).get("elements"):
+            return
+        await self._send_or_update_with_card(card)
+
+    async def _send_or_update_with_card(self, card: dict) -> None:
         await self._bucket.acquire()
         try:
             if self._state.current_turn_card_id is None:
-                user_uuid = self._current_turn.user_event.uuid if self._current_turn.user_event else "orphan"
+                # Idempotency key: max 32 chars + hex only (Feishu constraint).
+                # Use last 16 hex chars of user_uuid (or random fallback).
+                import hashlib
+                user_uuid = self._current_turn.user_event.uuid if self._current_turn and self._current_turn.user_event else ""
+                short_id = hashlib.sha256(user_uuid.encode()).hexdigest()[:16] if user_uuid else "noUUID"
+                key = f"fbc{short_id}"  # ~19 chars, safe under any plausible limit
                 msg_id = await self._lark.send_card(
-                    chat_id=chat_id,
+                    chat_id=self._effective_chat_id(),
                     card=card,
-                    idempotency_key=f"{self._state.binding_name}-{user_uuid}",
+                    idempotency_key=key,
                 )
                 self._state.set_current_turn_card(msg_id)
             else:
@@ -111,13 +126,14 @@ class OutboundPipeline:
                     card=card,
                 )
         except Exception as e:
-            # Single-card failure shouldn't abort the whole backlog replay.
-            # Log + skip this turn (current_turn_card_id stays None so next
-            # event in the same turn will retry as a fresh send).
             logger.warning(
                 "send/update card failed for turn (binding=%s): %s",
                 self._state.binding_name, e,
             )
+
+    def _effective_chat_id(self) -> str:
+        """chat_id source of truth: state (persisted) overrides constructor arg."""
+        return self._state.chat_id or self._chat_id
 
     async def bootstrap_with_chat_id(self, chat_id: str) -> None:
         """Called when the user sends their first message to the bot.

@@ -113,7 +113,15 @@ class RealTmux(Tmux):
             )
             if result.returncode != 0:
                 msg = result.stderr.strip()
-                if "can't find session" in msg or "no session" in msg.lower():
+                # tmux 3.x → "can't find session", 3.4+ → "can't find pane",
+                # and some shells emit "session not found". Treat all as "no session".
+                lower = msg.lower()
+                if (
+                    "can't find session" in lower
+                    or "can't find pane" in lower
+                    or "no session" in lower
+                    or "session not found" in lower
+                ):
                     raise RuntimeError(f"no session: {session!r}")
                 raise RuntimeError(f"tmux send-keys failed: {msg}")
 
@@ -124,7 +132,15 @@ class RealTmux(Tmux):
             )
             if result.returncode != 0:
                 msg = result.stderr.strip()
-                if "can't find session" in msg or "no session" in msg.lower():
+                # tmux 3.x → "can't find session", 3.4+ → "can't find pane",
+                # and some shells emit "session not found". Treat all as "no session".
+                lower = msg.lower()
+                if (
+                    "can't find session" in lower
+                    or "can't find pane" in lower
+                    or "no session" in lower
+                    or "session not found" in lower
+                ):
                     raise RuntimeError(f"no session: {session!r}")
                 raise RuntimeError(f"tmux send-keys Enter failed: {msg}")
 

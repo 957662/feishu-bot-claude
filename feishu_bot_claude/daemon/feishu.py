@@ -33,6 +33,10 @@ class LarkCli(ABC):
         """Update the content of a previously-sent card by message_id."""
 
     @abstractmethod
+    async def add_reaction(self, message_id: str, emoji_type: str) -> None:
+        """Attach a reaction emoji to an existing message."""
+
+    @abstractmethod
     def consume_events(self, event_key: str, max_events: int = 0) -> AsyncIterator[dict]:
         """Subscribe to a Feishu event key, yielding event dicts as they arrive.
 
@@ -112,6 +116,13 @@ class FakeLarkCli(LarkCli):
             "kind": "update",
             "message_id": message_id,
             "card": card,
+        })
+
+    async def add_reaction(self, message_id: str, emoji_type: str) -> None:
+        self.send_calls.append({
+            "kind": "reaction",
+            "message_id": message_id,
+            "emoji_type": emoji_type,
         })
 
     async def consume_events(self, event_key: str, max_events: int = 0) -> AsyncIterator[dict]:
@@ -245,15 +256,30 @@ class RealLarkCli(LarkCli):
         return self._extract_message_id(out)
 
     async def update_card(self, message_id: str, card: dict) -> None:
+        # lark-cli 1.0.41 has no `im messages patch` shortcut. Call the raw
+        # Feishu API: PATCH /open-apis/im/v1/messages/{message_id}
+        # Body: {"content": "<card json string>"} — content must be a *string*
+        # containing the card JSON, NOT a nested object (per Feishu docs).
+        body = {"content": json.dumps(card, ensure_ascii=False)}
         args = [
-            "im", "messages", "patch",
+            "api", "PATCH", f"/open-apis/im/v1/messages/{message_id}",
             *self._common_args(),
-            "--message-id", message_id,
-            "--card", json.dumps(card, ensure_ascii=False),
+            "--data", json.dumps(body, ensure_ascii=False),
         ]
         out, code = await self._run_raw(args, timeout=30.0)
         if code != 0:
             raise RuntimeError(f"lark-cli update_card failed (exit {code}): {out!r}")
+
+    async def add_reaction(self, message_id: str, emoji_type: str) -> None:
+        args = [
+            "im", "reactions", "create",
+            *self._common_args(),
+            "--params", json.dumps({"message_id": message_id}, ensure_ascii=False),
+            "--data", json.dumps({"reaction_type": {"emoji_type": emoji_type}}, ensure_ascii=False),
+        ]
+        out, code = await self._run_raw(args, timeout=15.0)
+        if code != 0:
+            raise RuntimeError(f"lark-cli add_reaction failed (exit {code}): {out!r}")
 
     async def consume_events(self, event_key: str, max_events: int = 0) -> AsyncIterator[dict]:
         args = [

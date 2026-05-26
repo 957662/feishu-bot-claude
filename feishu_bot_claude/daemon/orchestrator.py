@@ -76,7 +76,9 @@ class Orchestrator:
         state_path = self._data_dir / f"state-{cfg.name}.json"
         state = BindingRuntimeState.load(cfg.name, state_path)
 
-        bucket = TokenBucket(rate_per_sec=10, capacity=20)
+        # Feishu app-bot messaging cap is ~50/sec, 1000/min per tenant.
+        # Burst capacity 50 = 1s headroom; replay drains in ~10 min for 30k turns.
+        bucket = TokenBucket(rate_per_sec=45, capacity=50)
 
         if jsonl_path is None:
             jsonl_path = self._guess_jsonl_path(cfg)
@@ -107,11 +109,14 @@ class Orchestrator:
             allow_users=set(cfg.allow_users) if cfg.allow_users else None,
             max_message_length=cfg.max_message_length,
             on_chat_id_discovered=_on_chat_discovered,
+            # If state already has chat_id (prior bootstrap), skip the
+            # "consume first message" behavior on this restart.
+            bootstrap_complete=bool(state.chat_id),
         )
 
         # Initial backlog process. If chat_id is already known from a prior
         # bootstrap (persisted in state), this will send/update cards. If not,
-        # _send_or_update silently skips and replay waits for first message.
+        # _flush_current_turn silently skips and replay waits for first message.
         await outbound.process_backlog()
 
         running = RunningBinding(config=cfg, state=state, outbound=outbound, inbound=inbound)

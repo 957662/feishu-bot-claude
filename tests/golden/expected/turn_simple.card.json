@@ -14,13 +14,8 @@
         "content": "你好!有什么可以帮你?"
       },
       {
-        "tag": "note",
-        "elements": [
-          {
-            "tag": "plain_text",
-            "content": "10+12 tokens"
-          }
-        ]
+        "tag": "markdown",
+        "content": "<font color='grey'>10+12 tokens</font>"
       }
     ]
   }

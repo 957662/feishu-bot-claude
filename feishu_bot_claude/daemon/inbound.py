@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
+from collections import OrderedDict
 
 from feishu_bot_claude.daemon.feishu import LarkCli
 from feishu_bot_claude.daemon.tmux import Tmux
@@ -31,6 +33,7 @@ class InboundPipeline:
         max_message_length: int = 8000,
         event_key: str = "im.message.receive_v1",
         on_chat_id_discovered=None,
+        bootstrap_complete: bool = False,
     ) -> None:
         self._tmux_session = tmux_session
         self._tmux = tmux
@@ -40,7 +43,16 @@ class InboundPipeline:
         self._max_message_length = max_message_length
         self._event_key = event_key
         self._on_chat_id_discovered = on_chat_id_discovered
-        self._chat_id_seen = False
+        # If the bot has already bootstrapped (e.g. persisted chat_id in state
+        # from a prior daemon run), the next message is a REAL message and must
+        # be forwarded to Claude — not consumed as a bootstrap.
+        self._chat_id_seen = bootstrap_complete
+        # event_id LRU dedup — Feishu's event bus is at-least-once, lark-cli
+        # has an internal dedup filter but it doesn't always catch retries
+        # (especially across reconnects). Track recent event_ids ourselves so
+        # we don't double-forward the same user message to Claude.
+        self._seen_event_ids: OrderedDict[str, None] = OrderedDict()
+        self._seen_event_ids_max = 1024
 
     async def process_until_idle(self, max_events: int = 0) -> None:
         """Consume events until the fake queue drains or max_events hit."""
@@ -52,6 +64,18 @@ class InboundPipeline:
                 break
 
     async def _handle(self, event: dict) -> None:
+        # Drop duplicates: Feishu's event bus is at-least-once. Same event_id
+        # → same physical event from the user; forwarding it twice would
+        # cause Claude to receive duplicate messages.
+        event_id = event.get("event_id") or event.get("header", {}).get("event_id")
+        if event_id:
+            if event_id in self._seen_event_ids:
+                logger.info("dropping duplicate event_id=%s", event_id)
+                return
+            self._seen_event_ids[event_id] = None
+            if len(self._seen_event_ids) > self._seen_event_ids_max:
+                self._seen_event_ids.popitem(last=False)
+
         evt_type = event.get("type", "")
         if evt_type == "im.message.receive_v1":
             await self._handle_message(event)
@@ -63,8 +87,8 @@ class InboundPipeline:
     async def _handle_message(self, event: dict) -> None:
         # lark-cli emits a flat event structure (NOT the Feishu webhook's
         # nested {event:{message:{...},sender:{...}}}). Fields like chat_id,
-        # message_type, content, sender_id sit at the top level. content is
-        # the plain text string for text messages, not a JSON blob.
+        # message_type, content, sender_id, message_id sit at the top level.
+        # content is the plain text string for text messages, not a JSON blob.
         # Some fields (chat_id, sender_id) may also live under event.event
         # depending on lark-cli version — read with fallback.
         chat_id = event.get("chat_id") or event.get("event", {}).get("message", {}).get("chat_id", "")
@@ -73,6 +97,7 @@ class InboundPipeline:
         if content_raw is None:
             content_raw = event.get("event", {}).get("message", {}).get("content", "")
         sender = event.get("sender_id") or event.get("event", {}).get("sender", {}).get("sender_id", {}).get("open_id", "")
+        message_id = event.get("message_id") or event.get("event", {}).get("message", {}).get("message_id", "")
 
         # Auto-discover chat_id on first message. This is the BOOTSTRAP message —
         # the user sends "hi" (or anything) to start the mirror. We consume it:
@@ -117,7 +142,20 @@ class InboundPipeline:
             return
         if len(text) > self._max_message_length:
             text = text[: self._max_message_length] + "\n...[truncated]"
+        # Ack the user's message with a reaction so they see Claude received
+        # it immediately (before Claude finishes generating a reply). Done
+        # as fire-and-forget — reaction failure must not block forwarding.
+        # See full emoji_type list at
+        # open.feishu.cn/.../message-reaction/emojis-introduce
+        if message_id:
+            asyncio.create_task(self._react_quietly(message_id, "LOVE"))
         self._tmux.send_keys(session=self._tmux_session, keys=text + "\n")
+
+    async def _react_quietly(self, message_id: str, emoji_type: str) -> None:
+        try:
+            await self._lark.add_reaction(message_id, emoji_type)
+        except Exception as e:
+            logger.warning("add_reaction failed for message %s: %s", message_id, e)
 
     async def _handle_menu(self, event: dict) -> None:
         ev = event.get("event", {})

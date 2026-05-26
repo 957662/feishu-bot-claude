@@ -41,7 +41,14 @@ async def test_outbound_processes_existing_events_on_start(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_outbound_updates_card_on_tool_use(tmp_path):
+async def test_outbound_single_card_per_turn(tmp_path):
+    """A turn (user → assistant → tool_result) is sent as ONE final card.
+
+    The old design sent a card on every assistant event and then updated it
+    repeatedly. Feishu rate-limits and rejects many of those (especially when
+    replaying historical conversations), so we now batch the entire turn and
+    send a single card at the turn boundary (next user event) or stream end.
+    """
     jsonl = tmp_path / "session.jsonl"
     _append_event(jsonl, {"role": "user", "uuid": "u1", "content": [{"type": "text", "text": "read it"}]})
     _append_event(jsonl, {"role": "assistant", "uuid": "a1", "content": [
@@ -62,8 +69,10 @@ async def test_outbound_updates_card_on_tool_use(tmp_path):
     )
     await pipeline.process_backlog()
     kinds = [c["kind"] for c in lark.send_calls]
+    # tool_result-only user event does NOT open a new turn, so the whole
+    # exchange is one turn → one card, zero updates.
     assert kinds.count("card") == 1
-    assert kinds.count("update") >= 1
+    assert kinds.count("update") == 0
 
 
 @pytest.mark.asyncio
