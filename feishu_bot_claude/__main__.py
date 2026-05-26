@@ -36,6 +36,7 @@ async def _run_daemon() -> None:
     from feishu_bot_claude.daemon.orchestrator import Orchestrator
     from feishu_bot_claude.daemon.tmux import RealTmux
     from feishu_bot_claude.daemon.feishu import RealLarkCli
+    from feishu_bot_claude.config.keychain import MacOSKeychainStore
 
     store = BindingStore(bindings_path)
     orchestrator = Orchestrator(
@@ -45,10 +46,17 @@ async def _run_daemon() -> None:
         data_dir=data_dir,
     )
 
+    keychain = MacOSKeychainStore()
+    real_lark = RealLarkCli()
+
     server = await serve(
         socket_path=socket_path,
         bindings_path=bindings_path,
         orchestrator=orchestrator,
+        keychain=keychain,
+        auth_runner_factory=lambda: real_lark.auth_bot_new_stream(),
+        menu_pusher=real_lark,
+        data_dir=data_dir,
     )
     try:
         async with server:

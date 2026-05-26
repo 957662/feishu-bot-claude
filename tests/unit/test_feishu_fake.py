@@ -68,3 +68,28 @@ async def test_fake_consume_obeys_max_events():
     async for evt in lark.consume_events(event_key="im.message.receive_v1", max_events=3):
         received.append(evt)
     assert len(received) == 3
+
+
+@pytest.mark.asyncio
+async def test_fake_auth_bot_new_stream_yields_lines():
+    lark = FakeLarkCli()
+    lark.set_auth_lines(["line 1", "line 2", '{"app_id":"x","app_secret":"y"}'])
+    received = []
+    async for line in lark.auth_bot_new_stream():
+        received.append(line.rstrip("\n"))
+    assert received == ["line 1", "line 2", '{"app_id":"x","app_secret":"y"}']
+
+
+@pytest.mark.asyncio
+async def test_fake_push_menu_records():
+    lark = FakeLarkCli()
+    await lark.push_menu(app_id="cli_x", menu_json={"a": 1})
+    assert lark._menu_pushes == [{"app_id": "cli_x", "menu": {"a": 1}}]
+
+
+@pytest.mark.asyncio
+async def test_fake_push_menu_can_fail():
+    lark = FakeLarkCli()
+    lark.fail_menu_push(True)
+    with pytest.raises(RuntimeError, match="fake menu API failure"):
+        await lark.push_menu(app_id="cli_x", menu_json={})

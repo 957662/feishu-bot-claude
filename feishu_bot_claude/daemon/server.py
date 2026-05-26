@@ -26,7 +26,14 @@ from feishu_bot_claude.proto import DoneEvent, Request, ResultEvent
 logger = logging.getLogger(__name__)
 
 
-def _build_dispatcher(store: BindingStore, orchestrator=None) -> Dispatcher:
+def _build_dispatcher(
+    store: BindingStore,
+    orchestrator=None,
+    keychain=None,
+    auth_runner_factory=None,
+    menu_pusher=None,
+    data_dir=None,
+) -> Dispatcher:
     d = Dispatcher()
     d.register("ping", handle_ping)
     d.register("status", handle_status)
@@ -51,8 +58,25 @@ def _build_dispatcher(store: BindingStore, orchestrator=None) -> Dispatcher:
         d.register("start", handle_start)
         d.register("stop", handle_stop)
 
-    d.register("bind", handle_bind)
-    d.register("unbind", handle_unbind)
+    if orchestrator is not None and keychain is not None and auth_runner_factory is not None:
+        async def _bind_with_orch(args):
+            from feishu_bot_claude.daemon.handlers import handle_bind_with_orchestrator
+            async for ev in handle_bind_with_orchestrator(
+                args, store=store, keychain=keychain,
+                auth_runner_factory=auth_runner_factory,
+                menu_pusher=menu_pusher, data_dir=data_dir,
+            ):
+                yield ev
+        async def _unbind_with_orch(args):
+            from feishu_bot_claude.daemon.handlers import handle_unbind_with_orchestrator
+            async for ev in handle_unbind_with_orchestrator(args, store=store, keychain=keychain):
+                yield ev
+        d.register("bind", _bind_with_orch)
+        d.register("unbind", _unbind_with_orch)
+    else:
+        d.register("bind", handle_bind)
+        d.register("unbind", handle_unbind)
+
     d.register("config", handle_config)
     d.register("shell", handle_shell)
     return d
@@ -104,7 +128,15 @@ async def _write_event(writer: asyncio.StreamWriter, event) -> None:
     await writer.drain()
 
 
-async def serve(socket_path: Path, bindings_path: Path, orchestrator=None) -> asyncio.AbstractServer:
+async def serve(
+    socket_path: Path,
+    bindings_path: Path,
+    orchestrator=None,
+    keychain=None,
+    auth_runner_factory=None,
+    menu_pusher=None,
+    data_dir=None,
+) -> asyncio.AbstractServer:
     """Start the daemon server bound to a Unix socket. Returns the running server."""
     socket_path = Path(socket_path)
     if socket_path.exists():
@@ -112,7 +144,14 @@ async def serve(socket_path: Path, bindings_path: Path, orchestrator=None) -> as
     socket_path.parent.mkdir(parents=True, exist_ok=True)
 
     store = BindingStore(bindings_path)
-    dispatcher = _build_dispatcher(store, orchestrator=orchestrator)
+    dispatcher = _build_dispatcher(
+        store,
+        orchestrator=orchestrator,
+        keychain=keychain,
+        auth_runner_factory=auth_runner_factory,
+        menu_pusher=menu_pusher,
+        data_dir=data_dir,
+    )
 
     async def _on_client(reader, writer):
         await _handle_client(reader, writer, dispatcher)
