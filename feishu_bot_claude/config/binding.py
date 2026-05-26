@@ -92,6 +92,9 @@ class BindingStore:
         ...
 
     Writes are atomic (write to tempfile, then rename) and enforce 0600 perms.
+
+    Not thread-safe; create one instance per thread/process. Multi-PROCESS
+    safety provided by fcntl flock on bindings.toml.
     """
 
     def __init__(self, path: Path) -> None:
@@ -121,14 +124,24 @@ class BindingStore:
             raise ValueError(
                 f"project_dir {binding.project_dir!r} already bound to a binding"
             )
+        snapshot = list(self._cache)
         self._cache.append(binding)
-        self._save()
+        try:
+            self._save()
+        except Exception:
+            self._cache = snapshot
+            raise
 
     def remove(self, name: str) -> None:
         for i, b in enumerate(self._cache):
             if b.name == name:
+                snapshot = list(self._cache)
                 del self._cache[i]
-                self._save()
+                try:
+                    self._save()
+                except Exception:
+                    self._cache = snapshot
+                    raise
                 return
         raise KeyError(name)
 
@@ -168,6 +181,10 @@ class BindingStore:
         # Overlay our cache (includes adds; excludes deletes).
         for b in cache:
             if b.name in by_name and by_name[b.name] != b:
+                # This can only fire when two separate BindingStore instances
+                # both add (or modify) the same name concurrently: one
+                # instance's add lands on disk between the other's _load and
+                # _merge, producing divergent content for the same key.
                 raise ValueError(
                     f"concurrent modification: {b.name!r} differs on disk"
                 )
@@ -179,14 +196,20 @@ class BindingStore:
         with _exclusive_lock(self._path):
             disk = self._load_unlocked()
             merged = self._merge(disk, self._cache)
-            self._cache = merged
-            self._known_names = {b.name for b in self._cache}
-            payload = {"binding": [_binding_to_dict(b) for b in self._cache]}
+            payload = {"binding": [_binding_to_dict(b) for b in merged]}
             tmp = self._path.with_suffix(self._path.suffix + ".tmp")
             with tmp.open("wb") as f:
                 tomli_w.dump(payload, f)
             os.chmod(tmp, _DEFAULT_FILE_MODE)
             os.replace(tmp, self._path)
+            # Update in-memory state AFTER the disk write succeeds, so a
+            # failed write never leaves the instance ahead of the actual file.
+            # _known_names is updated here (not in __init__ or add/remove) so
+            # it always reflects what was last successfully committed to disk —
+            # ensuring _merge can correctly distinguish "added by another
+            # process" from "deleted by us".
+            self._cache = merged
+            self._known_names = {b.name for b in self._cache}
 
 
 def _binding_to_dict(b: BindingConfig) -> dict:

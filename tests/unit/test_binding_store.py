@@ -124,8 +124,4 @@ def test_concurrent_writes_do_not_corrupt(tmp_path):
 
     final = BindingStore(path).all()
     names = {b.name for b in final}
-    if not errors:
-        assert names == {"alpha", "beta"}
-    else:
-        assert len(errors) == 1
-        assert len(names) == 1
+    assert not errors and names == {"alpha", "beta"}
