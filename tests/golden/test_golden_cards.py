@@ -5,42 +5,11 @@ from pathlib import Path
 
 import pytest
 
-from feishu_bot_claude.rendering.turn import JsonlEvent, group_into_turns
-from feishu_bot_claude.rendering.card import build_card, build_header, build_markdown, build_note
-from feishu_bot_claude.rendering.tools import render_tool_block
+from feishu_bot_claude.rendering.turn import JsonlEvent, group_into_turns, render_turn_to_card
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
 EXPECTED_DIR = Path(__file__).parent / "expected"
 
-
-def render_turn_to_card(turn, project_name: str = "test-project", render_style: str = "rich") -> dict:
-    """Reference implementation: turn → card JSON. Promoted from this test into
-    `rendering/turn.py` as a real function in Task 4.6.
-    """
-    elements: list[dict] = []
-    for event in turn.assistant_events:
-        for part in event.content:
-            if part.get("type") == "text" and part.get("text"):
-                elements.append(build_markdown(part["text"]))
-            elif part.get("type") == "tool_use":
-                tool_use = part
-                tool_result = None
-                for later in turn.assistant_events:
-                    for p in later.content:
-                        if p.get("type") == "tool_result" and p.get("tool_use_id") == tool_use.get("id"):
-                            tool_result = p
-                            break
-                block = render_tool_block(tool_use, tool_result, render_style=render_style)
-                if block is not None:
-                    elements.append(block)
-
-    total_in = sum(e.raw.get("usage", {}).get("input_tokens", 0) for e in turn.assistant_events)
-    total_out = sum(e.raw.get("usage", {}).get("output_tokens", 0) for e in turn.assistant_events)
-    if total_in or total_out:
-        elements.append(build_note(f"{total_in}+{total_out} tokens"))
-
-    header = build_header(title=f"🤖 Claude · {project_name}")
-    return build_card(header=header, elements=elements)
 
 
 def _load_or_write_golden(name: str, actual: dict, write: bool = False) -> dict | None:

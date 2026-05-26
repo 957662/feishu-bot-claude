@@ -72,3 +72,35 @@ def group_into_turns(events: Iterable[JsonlEvent]) -> list[Turn]:
             current.assistant_events.append(event)
 
     return turns
+
+
+from feishu_bot_claude.rendering.card import build_card, build_header, build_markdown, build_note
+from feishu_bot_claude.rendering.tools import render_tool_block
+
+
+def render_turn_to_card(turn: Turn, project_name: str = "project", render_style: str = "rich") -> dict:
+    """Render a Turn to a Feishu interactive card JSON."""
+    elements: list[dict] = []
+    for event in turn.assistant_events:
+        for part in event.content:
+            if part.get("type") == "text" and part.get("text"):
+                elements.append(build_markdown(part["text"]))
+            elif part.get("type") == "tool_use":
+                tool_use = part
+                tool_result = None
+                for later in turn.assistant_events:
+                    for p in later.content:
+                        if p.get("type") == "tool_result" and p.get("tool_use_id") == tool_use.get("id"):
+                            tool_result = p
+                            break
+                block = render_tool_block(tool_use, tool_result, render_style=render_style)
+                if block is not None:
+                    elements.append(block)
+
+    total_in = sum(e.raw.get("usage", {}).get("input_tokens", 0) for e in turn.assistant_events)
+    total_out = sum(e.raw.get("usage", {}).get("output_tokens", 0) for e in turn.assistant_events)
+    if total_in or total_out:
+        elements.append(build_note(f"{total_in}+{total_out} tokens"))
+
+    header = build_header(title=f"🤖 Claude · {project_name}")
+    return build_card(header=header, elements=elements)
