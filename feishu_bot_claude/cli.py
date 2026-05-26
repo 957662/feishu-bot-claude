@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
+from pathlib import Path
+from typing import AsyncIterator
 
 from feishu_bot_claude.proto import (
     DoneEvent,
@@ -11,7 +14,39 @@ from feishu_bot_claude.proto import (
     QRCodeEvent,
     ResponseEvent,
     ResultEvent,
+    parse_response_line,
+    Request,
 )
+
+
+async def run_op(
+    socket_path: Path,
+    op: str,
+    args: dict,
+    request_id: str = "",
+) -> AsyncIterator[ResponseEvent]:
+    """Open the daemon socket, send one Request, yield ResponseEvents until done.
+
+    Yields events as they stream in (real-time UI feedback).
+    Raises ConnectionRefusedError if the daemon is not running.
+    """
+    reader, writer = await asyncio.open_unix_connection(str(socket_path))
+    try:
+        req = Request(op=op, args=args, request_id=request_id)
+        writer.write((req.to_json_line() + "\n").encode())
+        await writer.drain()
+
+        while True:
+            line = await reader.readline()
+            if not line:
+                break
+            event = parse_response_line(line.decode().rstrip("\n"))
+            yield event
+            if isinstance(event, DoneEvent):
+                break
+    finally:
+        writer.close()
+        await writer.wait_closed()
 
 
 def render_event(event: ResponseEvent) -> str:
