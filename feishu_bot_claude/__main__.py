@@ -59,6 +59,11 @@ async def _run_daemon() -> None:
         data_dir=data_dir,
     )
     try:
+        # Restore any bindings that were running before the daemon was last stopped
+        stale = await orchestrator.restore_from_disk()
+        if stale:
+            import logging
+            logging.getLogger(__name__).warning("Stale bindings (tmux missing): %s", stale)
         async with server:
             await server.serve_forever()
     except asyncio.CancelledError:

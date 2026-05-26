@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -110,6 +111,8 @@ class Orchestrator:
             name=f"inbound-{cfg.name}",
         ))
         self._running[cfg.name] = running
+        marker = self._data_dir / f"running-{cfg.name}"
+        marker.write_text(json.dumps({"jsonl_path": str(jsonl_path)}))
         return running
 
     async def stop_binding(self, cwd: str) -> None:
@@ -126,12 +129,43 @@ class Orchestrator:
                 await task
             except (asyncio.CancelledError, Exception):
                 pass
+        marker = self._data_dir / f"running-{cfg.name}"
+        marker.unlink(missing_ok=True)
 
     async def stop_all(self) -> None:
         for name in list(self._running.keys()):
             cfg = self._store.find_by_name(name)
             if cfg:
                 await self.stop_binding(cwd=cfg.project_dir)
+
+    async def restore_from_disk(self) -> list[str]:
+        """Re-attach bindings that were running when the daemon last shut down.
+
+        Reads `running-<name>` marker files from data_dir. For each, if the
+        binding still exists and tmux session is alive, calls `start_binding`.
+        Returns the names of bindings that couldn't be restored (stale).
+        """
+        stale: list[str] = []
+        for marker in self._data_dir.glob("running-*"):
+            name = marker.name[len("running-"):]
+            cfg = self._store.find_by_name(name)
+            if cfg is None:
+                marker.unlink(missing_ok=True)
+                continue
+            tmux = self._tmux_factory(name)
+            if not tmux.has_session(cfg.tmux_session):
+                stale.append(name)
+                marker.unlink(missing_ok=True)
+                continue
+            data: dict = {}
+            try:
+                data = json.loads(marker.read_text())
+            except Exception:
+                pass
+            jsonl_path_str = data.get("jsonl_path", "")
+            jsonl_path = Path(jsonl_path_str) if jsonl_path_str else None
+            await self.start_binding(cwd=cfg.project_dir, jsonl_path=jsonl_path)
+        return stale
 
     def _guess_jsonl_path(self, cfg: BindingConfig) -> Path:
         """Find newest jsonl in ~/.claude/projects/<encoded-cwd>/ — mtime-based."""
