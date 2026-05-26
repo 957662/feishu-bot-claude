@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from abc import ABC, abstractmethod
 
 
@@ -69,3 +70,68 @@ class FakeTmux(Tmux):
     def kill_session(self, name: str) -> None:
         self.calls.append(("kill_session", {"name": name}))
         self._sessions.discard(name)
+
+
+class RealTmux(Tmux):
+    """Real tmux backend — shells out to `tmux` binary."""
+
+    _NO_SESSION_RETURNCODE = 1  # tmux's exit code when the session is missing
+
+    def has_session(self, name: str) -> bool:
+        result = subprocess.run(
+            ["tmux", "has-session", "-t", name],
+            capture_output=True, text=True,
+        )
+        return result.returncode == 0
+
+    def new_session(self, name: str, cwd: str, command: str, attach_if_exists: bool = False) -> None:
+        if self.has_session(name):
+            if attach_if_exists:
+                return
+            raise ValueError(f"session {name!r} already exists")
+        result = subprocess.run(
+            ["tmux", "new-session", "-d", "-s", name, "-c", cwd, command],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"tmux new-session failed (exit {result.returncode}): {result.stderr.strip()}"
+            )
+
+    def send_keys(self, session: str, keys: str) -> None:
+        # Use -l (literal) so /, $, etc. aren't interpreted by tmux's key syntax.
+        # Send the keys themselves, then a separate Enter so newlines are reliable.
+        stripped = keys
+        needs_enter = stripped.endswith("\n")
+        if needs_enter:
+            stripped = stripped.rstrip("\n")
+
+        if stripped:
+            result = subprocess.run(
+                ["tmux", "send-keys", "-t", session, "-l", stripped],
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                msg = result.stderr.strip()
+                if "can't find session" in msg or "no session" in msg.lower():
+                    raise RuntimeError(f"no session: {session!r}")
+                raise RuntimeError(f"tmux send-keys failed: {msg}")
+
+        if needs_enter:
+            result = subprocess.run(
+                ["tmux", "send-keys", "-t", session, "Enter"],
+                capture_output=True, text=True,
+            )
+            if result.returncode != 0:
+                msg = result.stderr.strip()
+                if "can't find session" in msg or "no session" in msg.lower():
+                    raise RuntimeError(f"no session: {session!r}")
+                raise RuntimeError(f"tmux send-keys Enter failed: {msg}")
+
+    def kill_session(self, name: str) -> None:
+        result = subprocess.run(
+            ["tmux", "kill-session", "-t", name],
+            capture_output=True, text=True,
+        )
+        if result.returncode != 0 and "can't find session" not in result.stderr:
+            raise RuntimeError(f"tmux kill-session failed: {result.stderr.strip()}")
