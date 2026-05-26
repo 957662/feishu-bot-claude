@@ -198,6 +198,31 @@ def config(ctx, cwd, kv):
     sys.exit(_print_events_sync(ctx.obj["socket"], "config", {"cwd": str(cwd), "kv": list(kv)}))
 
 
+def _resolve_tmux_session(socket_path: Path, cwd: Path) -> str:
+    """Ask daemon for the tmux_session name bound to `cwd`.
+
+    Falls back to `claude-<basename(cwd)>` if no binding exists or daemon
+    is unreachable — keeps `shell` usable in pre-bind exploration.
+    """
+    fallback = f"claude-{cwd.name}"
+    cwd_resolved = str(cwd.resolve())
+
+    async def _ask():
+        try:
+            async for event in run_op(socket_path=socket_path, op="list", args={}):
+                if isinstance(event, ResultEvent) and event.ok and event.data:
+                    for b in event.data.get("bindings", []):
+                        if str(Path(b.get("project_dir", "")).resolve()) == cwd_resolved:
+                            return b.get("tmux_session") or fallback
+                if isinstance(event, DoneEvent):
+                    break
+        except (ConnectionRefusedError, OSError):
+            pass
+        return fallback
+
+    return asyncio.run(_ask())
+
+
 @main.command(
     help="Start tmux + claude shell for current project. Extra args are forwarded to claude.",
     context_settings={"ignore_unknown_options": True, "allow_extra_args": True},
@@ -208,10 +233,17 @@ def config(ctx, cwd, kv):
 def shell(ctx, cwd, claude_args):
     """shell doesn't go through the daemon — it's a thin tmux wrapper.
 
+    The tmux session name is resolved from the daemon's binding for this cwd
+    when one exists (so /bot-start and the shell agree). Falls back to
+    `claude-<basename(cwd)>` for unbound projects.
+
     Any args after the recognized options are forwarded to `claude`.
     Example: `feishu-bot-claude shell --dangerously-skip-permissions`
     """
     target = cwd or Path(os.getcwd())
+    target = target.resolve()  # ensure consistent matching
+    session_name = _resolve_tmux_session(ctx.obj["socket"], target)
+
     pkg_dir = Path(__file__).resolve().parent
     candidates = [
         pkg_dir.parent / "scripts" / "feishu-bot-claude-shell",  # editable install
@@ -221,5 +253,5 @@ def shell(ctx, cwd, claude_args):
     if script is None:
         click.echo(f"ERROR: shell helper not found in any of: {candidates}", err=True)
         sys.exit(2)
-    # argv: [script, cwd, ...claude_args]
-    os.execv(str(script), [str(script), str(target), *claude_args])
+    # argv: [script, cwd, session_name, ...claude_args]
+    os.execv(str(script), [str(script), str(target), session_name, *claude_args])

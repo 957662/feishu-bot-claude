@@ -15,8 +15,16 @@ if ! command -v claude >/dev/null 2>&1; then
 fi
 
 CWD="${1:-$PWD}"
-shift || true  # drop the cwd arg; remaining "$@" is forwarded to claude
-NAME="claude-$(basename "$CWD")"
+shift || true
+# Second arg (when present) is the resolved tmux session name from daemon.
+# Backward-compat fallback to claude-<basename(cwd)> if not supplied.
+if [ "$#" -gt 0 ] && [[ "$1" == claude-* ]]; then
+    NAME="$1"
+    shift
+else
+    NAME="claude-$(basename "$CWD")"
+fi
+# Remaining "$@" is forwarded to claude
 
 cd "$CWD"
 
