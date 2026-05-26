@@ -94,3 +94,60 @@ async def test_status_returns_daemon_info():
     assert events[0].ok is True
     assert "version" in events[0].data
     assert events[-1] == DoneEvent()
+
+
+from feishu_bot_claude.daemon.handlers import (
+    handle_start_with_orchestrator,
+    handle_stop_with_orchestrator,
+)
+from feishu_bot_claude.daemon.orchestrator import Orchestrator
+from feishu_bot_claude.daemon.tmux import FakeTmux
+from feishu_bot_claude.daemon.feishu import FakeLarkCli
+
+
+@pytest.mark.asyncio
+async def test_handle_start_succeeds(tmp_path):
+    tmux = FakeTmux()
+    lark = FakeLarkCli()
+    store = BindingStore(tmp_path / "bindings.toml")
+    orch = Orchestrator(
+        store=store,
+        tmux_factory=lambda n: tmux,
+        lark_factory=lambda c: lark,
+        data_dir=tmp_path,
+    )
+    project_dir = tmp_path / "p"
+    project_dir.mkdir()
+    cfg = _example_config(name="bot-p", project_dir=str(project_dir))
+    store.add(cfg)
+    tmux.set_session("claude-bot-p", exists=True)
+
+    events = []
+    async for ev in handle_start_with_orchestrator(
+        args={"cwd": str(project_dir), "jsonl_path": str(tmp_path / "session.jsonl")},
+        orchestrator=orch,
+    ):
+        events.append(ev)
+    assert events[0].ok is True
+    assert "bot-p" in events[0].data.get("name", "")
+    await orch.stop_binding(cwd=str(project_dir))
+
+
+@pytest.mark.asyncio
+async def test_handle_start_unknown_cwd_fails(tmp_path):
+    tmux = FakeTmux()
+    lark = FakeLarkCli()
+    store = BindingStore(tmp_path / "bindings.toml")
+    orch = Orchestrator(
+        store=store,
+        tmux_factory=lambda n: tmux,
+        lark_factory=lambda c: lark,
+        data_dir=tmp_path,
+    )
+    events = []
+    async for ev in handle_start_with_orchestrator(
+        args={"cwd": "/abs/nowhere"}, orchestrator=orch,
+    ):
+        events.append(ev)
+    assert events[0].ok is False
+    assert "no binding" in events[0].error.lower()

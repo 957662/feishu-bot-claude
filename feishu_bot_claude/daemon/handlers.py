@@ -85,3 +85,36 @@ async def handle_status(args: dict) -> AsyncIterator[ResponseEvent]:
         error=None,
     )
     yield DoneEvent()
+
+
+from pathlib import Path
+
+from feishu_bot_claude.daemon.orchestrator import Orchestrator
+
+
+async def handle_start_with_orchestrator(args: dict, orchestrator: Orchestrator) -> AsyncIterator[ResponseEvent]:
+    cwd = args.get("cwd", "")
+    jsonl_path_str = args.get("jsonl_path")
+    jsonl_path = Path(jsonl_path_str) if jsonl_path_str else None
+    try:
+        running = await orchestrator.start_binding(cwd=cwd, jsonl_path=jsonl_path)
+        yield ResultEvent(
+            ok=True,
+            data={"name": running.config.name, "tmux_session": running.config.tmux_session},
+            error=None,
+        )
+    except KeyError as e:
+        yield ResultEvent(ok=False, data=None, error=str(e))
+    except RuntimeError as e:
+        yield ResultEvent(ok=False, data=None, error=str(e))
+    yield DoneEvent()
+
+
+async def handle_stop_with_orchestrator(args: dict, orchestrator: Orchestrator) -> AsyncIterator[ResponseEvent]:
+    cwd = args.get("cwd", "")
+    try:
+        await orchestrator.stop_binding(cwd=cwd)
+        yield ResultEvent(ok=True, data={"stopped": True}, error=None)
+    except KeyError as e:
+        yield ResultEvent(ok=False, data=None, error=str(e))
+    yield DoneEvent()

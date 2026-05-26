@@ -26,7 +26,7 @@ from feishu_bot_claude.proto import DoneEvent, Request, ResultEvent
 logger = logging.getLogger(__name__)
 
 
-def _build_dispatcher(store: BindingStore) -> Dispatcher:
+def _build_dispatcher(store: BindingStore, orchestrator=None) -> Dispatcher:
     d = Dispatcher()
     d.register("ping", handle_ping)
     d.register("status", handle_status)
@@ -36,10 +36,23 @@ def _build_dispatcher(store: BindingStore) -> Dispatcher:
             yield ev
     d.register("list", _list_with_store)
 
+    if orchestrator is not None:
+        async def _start_with_orch(args):
+            from feishu_bot_claude.daemon.handlers import handle_start_with_orchestrator
+            async for ev in handle_start_with_orchestrator(args, orchestrator=orchestrator):
+                yield ev
+        async def _stop_with_orch(args):
+            from feishu_bot_claude.daemon.handlers import handle_stop_with_orchestrator
+            async for ev in handle_stop_with_orchestrator(args, orchestrator=orchestrator):
+                yield ev
+        d.register("start", _start_with_orch)
+        d.register("stop", _stop_with_orch)
+    else:
+        d.register("start", handle_start)
+        d.register("stop", handle_stop)
+
     d.register("bind", handle_bind)
     d.register("unbind", handle_unbind)
-    d.register("start", handle_start)
-    d.register("stop", handle_stop)
     d.register("config", handle_config)
     d.register("shell", handle_shell)
     return d
@@ -91,7 +104,7 @@ async def _write_event(writer: asyncio.StreamWriter, event) -> None:
     await writer.drain()
 
 
-async def serve(socket_path: Path, bindings_path: Path) -> asyncio.AbstractServer:
+async def serve(socket_path: Path, bindings_path: Path, orchestrator=None) -> asyncio.AbstractServer:
     """Start the daemon server bound to a Unix socket. Returns the running server."""
     socket_path = Path(socket_path)
     if socket_path.exists():
@@ -99,7 +112,7 @@ async def serve(socket_path: Path, bindings_path: Path) -> asyncio.AbstractServe
     socket_path.parent.mkdir(parents=True, exist_ok=True)
 
     store = BindingStore(bindings_path)
-    dispatcher = _build_dispatcher(store)
+    dispatcher = _build_dispatcher(store, orchestrator=orchestrator)
 
     async def _on_client(reader, writer):
         await _handle_client(reader, writer, dispatcher)
