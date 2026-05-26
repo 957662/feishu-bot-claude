@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Launch a tmux session named claude-<basename(cwd)> with `claude` running inside.
+# Idempotent: if the session exists, attaches instead.
+
+if ! command -v tmux >/dev/null 2>&1; then
+    echo "ERROR: tmux not installed. Install with: brew install tmux  (or apt install tmux)" >&2
+    exit 1
+fi
+
+if ! command -v claude >/dev/null 2>&1; then
+    echo "ERROR: claude (Claude Code CLI) not on PATH. See https://docs.claude.com/en/docs/claude-code" >&2
+    exit 1
+fi
+
+CWD="${1:-$PWD}"
+NAME="claude-$(basename "$CWD")"
+
+cd "$CWD"
+
+if tmux has-session -t "$NAME" 2>/dev/null; then
+    echo "Attaching to existing tmux session: $NAME"
+    exec tmux attach -t "$NAME"
+else
+    echo "Creating tmux session: $NAME"
+    exec tmux new-session -A -s "$NAME" -c "$CWD" claude
+fi
