@@ -24,9 +24,12 @@ class JsonlWatcher:
         """Yield None each time the file changes. stop_after=N exits after N signals; 0 = unlimited."""
         # Ensure parent exists so watchfiles can watch it
         self._path.parent.mkdir(parents=True, exist_ok=True)
+        # Resolve symlinks once so the comparison works on macOS where
+        # /var/folders is a symlink to /private/var/folders.
+        resolved_path = self._path.resolve()
         emitted = 0
         async for changes in watchfiles.awatch(self._path.parent, recursive=False):
-            relevant = any(Path(p) == self._path for _, p in changes)
+            relevant = any(Path(p).resolve() == resolved_path for _, p in changes)
             if relevant:
                 yield None
                 emitted += 1
