@@ -130,35 +130,51 @@ from feishu_bot_claude.menu_template import build_menu_json
 from feishu_bot_claude.proto import LogEvent, ProgressEvent, QRCodeEvent
 
 
-def _extract_app_id_from_larkcli(profile_name: str) -> str:
-    import os
+def _extract_app_id_from_larkcli(profile_name: str) -> str | None:
+    """Look up the Feishu app_id for a lark-cli profile.
+
+    Primary method: shell out to `lark-cli profile list --json` and find the
+    entry matching profile_name. This works across lark-cli versions/storage
+    layouts.
+
+    Fallback: read ~/.lark-cli/config.json (the active profile's config) if it
+    matches profile_name. Useful when shelling out is slow or unavailable.
+
+    Returns None on failure — caller decides whether to abort the bind.
+    """
     import json
+    import subprocess
     from pathlib import Path
-    candidates = [
-        Path.home() / ".lark-cli" / "profiles" / profile_name / "config.json",
-        Path.home() / ".config" / "lark-cli" / "profiles" / profile_name / "config.json",
-        Path.home() / ".lark-cli" / "profiles" / profile_name,
-        Path.home() / ".config" / "lark-cli" / "profiles" / profile_name,
-    ]
-    for p in candidates:
-        if p.is_file():
-            try:
-                data = json.loads(p.read_text())
-                for key in ("app_id", "AppId", "appId"):
-                    if key in data:
-                        return data[key]
-            except Exception:
-                pass
-        elif p.is_dir():
-            for f in p.glob("*.json"):
-                try:
-                    data = json.loads(f.read_text())
-                    for key in ("app_id", "AppId", "appId"):
-                        if key in data:
-                            return data[key]
-                except Exception:
-                    pass
-    return f"larkcli-profile:{profile_name}"
+
+    # Primary: `lark-cli profile list` (default output is JSON)
+    try:
+        result = subprocess.run(
+            ["lark-cli", "profile", "list"],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            profiles = json.loads(result.stdout.strip() or "[]")
+            for prof in profiles:
+                if prof.get("name") == profile_name:
+                    app_id = prof.get("appId") or prof.get("app_id") or prof.get("AppId")
+                    if app_id:
+                        return app_id
+    except (subprocess.SubprocessError, json.JSONDecodeError, FileNotFoundError):
+        pass
+
+    # Fallback: read the active config file directly
+    config_path = Path.home() / ".lark-cli" / "config.json"
+    if config_path.is_file():
+        try:
+            data = json.loads(config_path.read_text())
+            if data.get("profile") == profile_name:
+                app_id = data.get("appId") or data.get("app_id") or data.get("AppId")
+                if app_id:
+                    return app_id
+        except (json.JSONDecodeError, OSError):
+            pass
+
+    return None
 
 
 async def handle_bind_with_orchestrator(

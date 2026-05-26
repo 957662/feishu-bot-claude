@@ -144,7 +144,10 @@ async def serve(
         socket_path.unlink()
     socket_path.parent.mkdir(parents=True, exist_ok=True)
 
-    store = BindingStore(bindings_path)
+    # Use the orchestrator's store if provided so bind/list/start/stop all share
+    # the same in-memory cache. Creating a second BindingStore here would mean
+    # bind() updates one store's cache while find_by_cwd() reads from another.
+    store = orchestrator._store if orchestrator is not None else BindingStore(bindings_path)
     dispatcher = _build_dispatcher(
         store,
         orchestrator=orchestrator,
