@@ -2,13 +2,29 @@
 
 from __future__ import annotations
 
+import fcntl
 import os
 import tomllib
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 
 import tomli_w
+
+
+@contextmanager
+def _exclusive_lock(path: Path):
+    """Acquire an exclusive advisory lock on a sidecar lockfile."""
+    lock_path = path.with_suffix(path.suffix + ".lock")
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    fd = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
 
 
 _VALID_RENDER_STYLES = {"minimal", "full", "rich"}
@@ -81,6 +97,9 @@ class BindingStore:
     def __init__(self, path: Path) -> None:
         self._path = Path(path)
         self._cache: list[BindingConfig] = self._load()
+        # Track names we originally loaded so _merge can distinguish "deleted
+        # by us" from "never seen (added by another process)".
+        self._known_names: set[str] = {b.name for b in self._cache}
 
     def all(self) -> list[BindingConfig]:
         return list(self._cache)
@@ -114,20 +133,60 @@ class BindingStore:
         raise KeyError(name)
 
     def _load(self) -> list[BindingConfig]:
+        with _exclusive_lock(self._path):
+            return self._load_unlocked()
+
+    def _load_unlocked(self) -> list[BindingConfig]:
         if not self._path.exists():
             return []
         with self._path.open("rb") as f:
             data = tomllib.load(f)
         return [_dict_to_binding(b) for b in data.get("binding", [])]
 
+    def _merge(
+        self,
+        disk: list[BindingConfig],
+        cache: list[BindingConfig],
+    ) -> list[BindingConfig]:
+        """Merge disk state with in-memory cache.
+
+        Strategy:
+        - cache wins for entries present in cache.
+        - disk entries UNKNOWN to this store instance (added by another process
+          while we held no lock) are preserved.
+        - disk entries that were originally loaded by this instance but are now
+          absent from cache were explicitly deleted — do NOT restore them.
+        - Conflicts on `name` (same name, different content) raise.
+        """
+        cache_names: set[str] = {b.name for b in cache}
+        by_name: dict[str, BindingConfig] = {}
+        # Preserve disk entries that this instance never knew about (new entries
+        # written by another concurrent process).
+        for b in disk:
+            if b.name not in self._known_names:
+                by_name[b.name] = b
+        # Overlay our cache (includes adds; excludes deletes).
+        for b in cache:
+            if b.name in by_name and by_name[b.name] != b:
+                raise ValueError(
+                    f"concurrent modification: {b.name!r} differs on disk"
+                )
+            by_name[b.name] = b
+        return list(by_name.values())
+
     def _save(self) -> None:
         self._path.parent.mkdir(parents=True, exist_ok=True)
-        payload = {"binding": [_binding_to_dict(b) for b in self._cache]}
-        tmp = self._path.with_suffix(self._path.suffix + ".tmp")
-        with tmp.open("wb") as f:
-            tomli_w.dump(payload, f)
-        os.chmod(tmp, _DEFAULT_FILE_MODE)
-        os.replace(tmp, self._path)
+        with _exclusive_lock(self._path):
+            disk = self._load_unlocked()
+            merged = self._merge(disk, self._cache)
+            self._cache = merged
+            self._known_names = {b.name for b in self._cache}
+            payload = {"binding": [_binding_to_dict(b) for b in self._cache]}
+            tmp = self._path.with_suffix(self._path.suffix + ".tmp")
+            with tmp.open("wb") as f:
+                tomli_w.dump(payload, f)
+            os.chmod(tmp, _DEFAULT_FILE_MODE)
+            os.replace(tmp, self._path)
 
 
 def _binding_to_dict(b: BindingConfig) -> dict:

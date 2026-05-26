@@ -97,3 +97,35 @@ def test_toml_file_has_secure_permissions(tmp_path):
     store.add(_make_config())
     mode = path.stat().st_mode & 0o777
     assert mode == 0o600, f"expected 0600, got {oct(mode)}"
+
+
+import threading
+
+
+def test_concurrent_writes_do_not_corrupt(tmp_path):
+    """Two threads adding different bindings should both succeed and produce
+    a valid TOML file with both entries."""
+    path = tmp_path / "bindings.toml"
+    barrier = threading.Barrier(2)
+    errors: list[Exception] = []
+
+    def add_one(name: str, dir_: str) -> None:
+        try:
+            barrier.wait()
+            store = BindingStore(path)
+            store.add(_make_config(name=name, project_dir=dir_))
+        except Exception as e:  # noqa: BLE001
+            errors.append(e)
+
+    t1 = threading.Thread(target=add_one, args=("alpha", "/abs/alpha"))
+    t2 = threading.Thread(target=add_one, args=("beta", "/abs/beta"))
+    t1.start(); t2.start()
+    t1.join(); t2.join()
+
+    final = BindingStore(path).all()
+    names = {b.name for b in final}
+    if not errors:
+        assert names == {"alpha", "beta"}
+    else:
+        assert len(errors) == 1
+        assert len(names) == 1
