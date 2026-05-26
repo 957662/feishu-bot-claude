@@ -25,6 +25,25 @@ class Request:
             request_id=data.get("request_id", ""),
         )
 
+    def validate(self) -> None:
+        """Raise ValueError if the request is malformed."""
+        known_ops = {"bind", "unbind", "start", "stop", "list", "config", "status", "shell"}
+        if self.op not in known_ops:
+            raise ValueError(f"unknown op: {self.op!r} (known: {sorted(known_ops)})")
+        required = {
+            "bind": ("name", "cwd"),
+            "unbind": ("name",),
+            "start": ("cwd",),
+            "stop": ("cwd",),
+            "config": ("cwd",),
+            "status": (),
+            "list": (),
+            "shell": ("cwd",),
+        }
+        for key in required[self.op]:
+            if key not in self.args:
+                raise ValueError(f"{self.op} requires arg {key!r}")
+
 
 @dataclass(frozen=True)
 class LogEvent:

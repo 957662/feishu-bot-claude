@@ -86,3 +86,41 @@ def test_done_event_roundtrip():
 def test_parse_unknown_event_type_raises():
     with pytest.raises(ValueError, match="unknown event type"):
         parse_response_line('{"type": "alien", "foo": 1}')
+
+
+def test_request_rejects_unknown_op():
+    with pytest.raises(ValueError, match="unknown op"):
+        Request(op="not-a-real-op", args={}).validate()
+
+
+def _args_for(op: str) -> dict:
+    """Return minimal valid args for each op (helper for the test above)."""
+    return {
+        "bind": {"name": "x", "cwd": "/x"},
+        "unbind": {"name": "x"},
+        "start": {"cwd": "/x"},
+        "stop": {"cwd": "/x"},
+        "config": {"cwd": "/x"},
+        "status": {},
+        "list": {},
+        "shell": {"cwd": "/x"},
+    }[op]
+
+
+def test_request_accepts_known_ops():
+    for op in ["bind", "unbind", "start", "stop", "list", "config", "status", "shell"]:
+        Request(op=op, args=_args_for(op)).validate()  # no raise
+
+
+def test_request_bind_requires_name_and_cwd():
+    with pytest.raises(ValueError, match="bind requires"):
+        Request(op="bind", args={"name": "foo"}).validate()
+    with pytest.raises(ValueError, match="bind requires"):
+        Request(op="bind", args={"cwd": "/x"}).validate()
+    Request(op="bind", args={"name": "foo", "cwd": "/x"}).validate()  # ok
+
+
+def test_request_start_requires_cwd():
+    with pytest.raises(ValueError, match="start requires"):
+        Request(op="start", args={}).validate()
+    Request(op="start", args={"cwd": "/x"}).validate()  # ok
