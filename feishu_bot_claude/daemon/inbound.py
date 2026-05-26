@@ -61,42 +61,58 @@ class InboundPipeline:
             logger.debug("ignoring event type: %s", evt_type)
 
     async def _handle_message(self, event: dict) -> None:
-        msg = event.get("event", {}).get("message", {})
-        sender = event.get("event", {}).get("sender", {}).get("sender_id", {}).get("open_id", "")
+        # lark-cli emits a flat event structure (NOT the Feishu webhook's
+        # nested {event:{message:{...},sender:{...}}}). Fields like chat_id,
+        # message_type, content, sender_id sit at the top level. content is
+        # the plain text string for text messages, not a JSON blob.
+        # Some fields (chat_id, sender_id) may also live under event.event
+        # depending on lark-cli version — read with fallback.
+        chat_id = event.get("chat_id") or event.get("event", {}).get("message", {}).get("chat_id", "")
+        message_type = event.get("message_type") or event.get("event", {}).get("message", {}).get("message_type", "")
+        content_raw = event.get("content")
+        if content_raw is None:
+            content_raw = event.get("event", {}).get("message", {}).get("content", "")
+        sender = event.get("sender_id") or event.get("event", {}).get("sender", {}).get("sender_id", {}).get("open_id", "")
 
         # Auto-discover chat_id on first message. This is the BOOTSTRAP message —
         # the user sends "hi" (or anything) to start the mirror. We consume it:
         # capture chat_id, trigger backlog replay, but do NOT forward it to Claude.
         is_bootstrap = False
         if not self._chat_id_seen:
-            chat_id = msg.get("chat_id", "")
             if chat_id:
                 self._chat_id_seen = True
                 is_bootstrap = True
                 if self._on_chat_id_discovered is not None:
                     result = self._on_chat_id_discovered(chat_id)
-                    # Callback may return a coroutine (e.g. outbound.bootstrap_with_chat_id)
                     import asyncio as _asyncio
                     if _asyncio.iscoroutine(result):
                         await result
 
         if is_bootstrap:
-            # Bootstrap message is consumed — DO NOT forward to Claude.
-            logger.info("bootstrap message received; chat_id captured, history replay triggered")
+            logger.info(
+                "bootstrap message received; chat_id=%s captured, history replay triggered",
+                chat_id,
+            )
             return
 
         if self._allow_users is not None and sender not in self._allow_users:
             logger.info("dropping message from non-whitelisted sender %s", sender)
             return
-        if msg.get("message_type") != "text":
-            logger.info("skipping non-text message type: %s", msg.get("message_type"))
+        if message_type != "text":
+            logger.info("skipping non-text message type: %s", message_type)
             return
-        content_json = msg.get("content", "{}")
-        try:
-            text = json.loads(content_json).get("text", "")
-        except json.JSONDecodeError:
-            logger.warning("malformed message content: %r", content_json[:80])
-            return
+        # content is either a plain text string (lark-cli's flattened format)
+        # or a JSON-encoded {"text": "..."} (Feishu webhook raw format).
+        text = ""
+        if isinstance(content_raw, str):
+            stripped = content_raw.strip()
+            if stripped.startswith("{"):
+                try:
+                    text = json.loads(stripped).get("text", "")
+                except json.JSONDecodeError:
+                    text = content_raw
+            else:
+                text = content_raw
         if not text:
             return
         if len(text) > self._max_message_length:
