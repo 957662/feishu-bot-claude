@@ -34,3 +34,55 @@ def test_request_roundtrip():
     original = Request(op="start", args={"cwd": "/p"}, request_id="r-3")
     restored = Request.from_json_line(original.to_json_line())
     assert restored == original
+
+
+from feishu_bot_claude.proto import (
+    LogEvent,
+    QRCodeEvent,
+    ProgressEvent,
+    ResultEvent,
+    DoneEvent,
+    parse_response_line,
+)
+
+
+def test_log_event_roundtrip():
+    e = LogEvent(level="info", msg="hello")
+    line = e.to_json_line()
+    parsed = parse_response_line(line)
+    assert parsed == e
+
+
+def test_qrcode_event_roundtrip():
+    e = QRCodeEvent(ascii="█▀█", url="https://example/qr")
+    parsed = parse_response_line(e.to_json_line())
+    assert parsed == e
+
+
+def test_progress_event_roundtrip():
+    e = ProgressEvent(value=0.42, msg="working")
+    parsed = parse_response_line(e.to_json_line())
+    assert parsed == e
+
+
+def test_result_event_roundtrip_ok():
+    e = ResultEvent(ok=True, data={"x": 1}, error=None)
+    parsed = parse_response_line(e.to_json_line())
+    assert parsed == e
+
+
+def test_result_event_roundtrip_err():
+    e = ResultEvent(ok=False, data=None, error="something failed")
+    parsed = parse_response_line(e.to_json_line())
+    assert parsed == e
+
+
+def test_done_event_roundtrip():
+    e = DoneEvent()
+    parsed = parse_response_line(e.to_json_line())
+    assert parsed == e
+
+
+def test_parse_unknown_event_type_raises():
+    with pytest.raises(ValueError, match="unknown event type"):
+        parse_response_line('{"type": "alien", "foo": 1}')
