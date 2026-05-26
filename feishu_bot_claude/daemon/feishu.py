@@ -262,12 +262,17 @@ class RealLarkCli(LarkCli):
             stderr=asyncio.subprocess.STDOUT,
             env=os.environ.copy(),
         )
+        tail_lines: list[str] = []  # remember last few lines for error reporting
         try:
             while True:
                 line = await proc.stdout.readline()
                 if not line:
                     break
-                yield line.decode("utf-8", errors="replace")
+                decoded = line.decode("utf-8", errors="replace")
+                tail_lines.append(decoded.rstrip("\n"))
+                if len(tail_lines) > 30:
+                    tail_lines.pop(0)
+                yield decoded
         finally:
             if proc.returncode is None:
                 proc.terminate()
@@ -276,6 +281,15 @@ class RealLarkCli(LarkCli):
                 except asyncio.TimeoutError:
                     proc.kill()
                     await proc.wait()
+            # After process exits, check if it actually succeeded.
+            # lark-cli returns 0 only when the user has completed the browser
+            # auth flow AND Feishu accepted the app registration.
+            if proc.returncode != 0:
+                tail = "\n".join(tail_lines[-10:])
+                raise RuntimeError(
+                    f"lark-cli config init exited with code {proc.returncode}; "
+                    f"OAuth flow did not complete successfully. Last output:\n{tail}"
+                )
 
     async def push_menu(self, app_id: str, menu_json: dict) -> None:
         """Push menu config via lark-cli. Subcommand may vary; raises on failure."""

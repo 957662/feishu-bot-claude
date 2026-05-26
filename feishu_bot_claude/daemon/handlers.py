@@ -202,10 +202,25 @@ async def handle_bind_with_orchestrator(
 
     async def background_finish() -> None:
         from pathlib import Path
+        import logging
+        log = logging.getLogger("feishu_bot_claude.bind")
         try:
-            await bot_new(runner=auth_runner_factory(name), on_event=on_auth_event)
+            try:
+                await bot_new(runner=auth_runner_factory(name), on_event=on_auth_event)
+            except RuntimeError as e:
+                # OAuth failed — NOT saving a binding with placeholder app_id.
+                # User can retry /bot-new <same-name> after fixing the root cause.
+                log.error("Bind %r FAILED: %s", name, e)
+                return
             # bot_new succeeded → user completed scan, lark-cli profile saved
-            app_id = _extract_app_id_from_larkcli(name) or f"larkcli-profile:{name}"
+            app_id = _extract_app_id_from_larkcli(name)
+            if not app_id:
+                log.error(
+                    "Bind %r: lark-cli auth completed but couldn't extract app_id from "
+                    "any known profile path. NOT saving binding to avoid stale state.",
+                    name,
+                )
+                return
             secret_ref = f"feishu-bot-claude.{name}.app_secret"
             try:
                 keychain.put(secret_ref, "")  # lark-cli manages real secret
@@ -221,6 +236,7 @@ async def handle_bind_with_orchestrator(
                 created_at=datetime.now(timezone.utc),
             )
             store.add(binding)
+            log.info("Bind %r SAVED: app_id=%s project_dir=%s", name, app_id, cwd)
 
             if menu_pusher is not None:
                 try:
