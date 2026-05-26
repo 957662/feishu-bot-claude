@@ -30,6 +30,7 @@ class InboundPipeline:
         allow_users: set[str] | None = None,
         max_message_length: int = 8000,
         event_key: str = "im.message.receive_v1",
+        on_chat_id_discovered=None,
     ) -> None:
         self._tmux_session = tmux_session
         self._tmux = tmux
@@ -38,6 +39,8 @@ class InboundPipeline:
         self._allow_users = allow_users
         self._max_message_length = max_message_length
         self._event_key = event_key
+        self._on_chat_id_discovered = on_chat_id_discovered
+        self._chat_id_seen = False
 
     async def process_until_idle(self, max_events: int = 0) -> None:
         """Consume events until the fake queue drains or max_events hit."""
@@ -60,6 +63,12 @@ class InboundPipeline:
     async def _handle_message(self, event: dict) -> None:
         msg = event.get("event", {}).get("message", {})
         sender = event.get("event", {}).get("sender", {}).get("sender_id", {}).get("open_id", "")
+        # Auto-discover chat_id on first message
+        if not self._chat_id_seen:
+            chat_id = msg.get("chat_id", "")
+            if chat_id and self._on_chat_id_discovered is not None:
+                self._chat_id_seen = True
+                self._on_chat_id_discovered(chat_id)
         if self._allow_users is not None and sender not in self._allow_users:
             logger.info("dropping message from non-whitelisted sender %s", sender)
             return

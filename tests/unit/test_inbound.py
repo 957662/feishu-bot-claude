@@ -135,3 +135,64 @@ async def test_inbound_truncates_long_message():
     assert send_keys_calls
     keys = send_keys_calls[0][1]["keys"]
     assert len(keys) <= 200
+
+
+@pytest.mark.asyncio
+async def test_inbound_invokes_chat_id_callback():
+    """When a message arrives, on_chat_id_discovered should be called with the chat_id."""
+    tmux = FakeTmux()
+    tmux.set_session("claude-foo", exists=True)
+    lark = FakeLarkCli()
+    lark.enqueue_event({
+        "type": "im.message.receive_v1",
+        "event": {
+            "sender": {"sender_id": {"open_id": "ou_user"}},
+            "message": {
+                "message_type": "text",
+                "content": json.dumps({"text": "hello"}),
+                "chat_id": "oc_test_chat",
+            },
+        },
+    })
+
+    discovered_ids: list[str] = []
+
+    pipeline = InboundPipeline(
+        tmux_session="claude-foo",
+        tmux=tmux,
+        lark=lark,
+        on_chat_id_discovered=lambda chat_id: discovered_ids.append(chat_id),
+    )
+    await pipeline.process_until_idle(max_events=1)
+    assert discovered_ids == ["oc_test_chat"]
+
+
+@pytest.mark.asyncio
+async def test_inbound_callback_only_fired_once():
+    """The chat_id callback should be invoked only on the first message."""
+    tmux = FakeTmux()
+    tmux.set_session("claude-foo", exists=True)
+    lark = FakeLarkCli()
+    for i in range(3):
+        lark.enqueue_event({
+            "type": "im.message.receive_v1",
+            "event": {
+                "sender": {"sender_id": {"open_id": "ou_user"}},
+                "message": {
+                    "message_type": "text",
+                    "content": json.dumps({"text": f"msg-{i}"}),
+                    "chat_id": "oc_test_chat",
+                },
+            },
+        })
+
+    discovered_ids: list[str] = []
+
+    pipeline = InboundPipeline(
+        tmux_session="claude-foo",
+        tmux=tmux,
+        lark=lark,
+        on_chat_id_discovered=lambda chat_id: discovered_ids.append(chat_id),
+    )
+    await pipeline.process_until_idle(max_events=3)
+    assert discovered_ids == ["oc_test_chat"]  # only once
