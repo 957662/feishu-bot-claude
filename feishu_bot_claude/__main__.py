@@ -27,12 +27,36 @@ async def _run_daemon() -> None:
         "FEISHU_BOT_CLAUDE_BINDINGS",
         _DEFAULT_DATA_DIR / "bindings.toml",
     ))
-    server = await serve(socket_path=socket_path, bindings_path=bindings_path)
+    data_dir = Path(os.environ.get(
+        "FEISHU_BOT_CLAUDE_DATA_DIR",
+        _DEFAULT_DATA_DIR,
+    ))
+
+    from feishu_bot_claude.config.binding import BindingStore
+    from feishu_bot_claude.daemon.orchestrator import Orchestrator
+    from feishu_bot_claude.daemon.tmux import RealTmux
+    from feishu_bot_claude.daemon.feishu import RealLarkCli
+
+    store = BindingStore(bindings_path)
+    orchestrator = Orchestrator(
+        store=store,
+        tmux_factory=lambda name: RealTmux(),
+        lark_factory=lambda cfg: RealLarkCli(),
+        data_dir=data_dir,
+    )
+
+    server = await serve(
+        socket_path=socket_path,
+        bindings_path=bindings_path,
+        orchestrator=orchestrator,
+    )
     try:
         async with server:
             await server.serve_forever()
     except asyncio.CancelledError:
         pass
+    finally:
+        await orchestrator.stop_all()
 
 
 def main() -> int:
