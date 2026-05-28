@@ -167,35 +167,42 @@
 | 东西 | 是什么 | 怎么装 |
 |---|---|---|
 | **macOS** | 这个项目只支持 Mac(Windows 用姊妹仓) | — |
-| **Python 3.11+** | 写这个工具的语言 | `brew install python@3.12` |
-| **Node.js 16+** | 装 `lark-cli` 用 | `brew install node` |
-| **tmux** | 终端复用器,Claude 跑在它里面 | `brew install tmux` |
-| **Claude Code** | 你要遥控的对象 | [claude.com/code](https://claude.com/code) |
+| **Python 3.11+** | 写这个工具的语言 | setup.sh 会自动 `brew install python@3.12` |
+| **Node.js 16+** | 装 `lark-cli` 用 | setup.sh 会自动 `brew install node` |
+| **tmux** | 终端复用器,Claude 跑在它里面 | setup.sh 会自动 `brew install tmux` |
+| **Claude Code** | 你要遥控的对象 | setup.sh 会自动 `npm i -g @anthropic-ai/claude-code` |
 | **飞书账号** | 用来扫码登录、收发消息 | 国内版 `feishu.cn` |
 | **飞书开发者权限** | 创建机器人 App 需要 | 默认账号就有 |
 
-> **注**:`lark-cli` 不需要你手动装,`setup.sh` 会跑 `npm i -g @larksuite/cli` 自动装好。
-
-> **可选**:装 `mermaid-cli` 可以把 ` ```mermaid ` 代码块自动渲染成图片插到卡片里 — `npm i -g @mermaid-js/mermaid-cli`。没装也能跑,会自动回退到 `mermaid.ink` 在线服务;两个都失败时保留原始代码块文本。
+> **注**:除了飞书账号,**所有依赖 setup.sh 会检测 + 询问你后自动装好**(macOS 用 brew,Linux 用 apt)。没装 brew 也会先帮你装 brew。
 
 ## 📥 安装
 
 ```bash
 git clone https://github.com/957662/feishu-bot-claude ~/project/feishu-bot-claude
 cd ~/project/feishu-bot-claude
+
+# 交互式:每个缺失依赖都会问你装不装
 ./setup.sh
+
+# 或者一把梭(全部 Y)
+./setup.sh install -y
+
+# 只检测不装(看缺啥)
+./setup.sh doctor
 ```
 
-`setup.sh` 做了这些事(可以打开脚本看):
+`setup.sh` 做了这些事:
 
 | 步骤 | 干了啥 |
 |---|---|
-| 1 | 在项目目录建 `.venv/` Python 虚拟环境(不污染全局) |
-| 2 | `pip install -e .` 装项目依赖 |
-| 3 | `npm i -g @larksuite/cli` 装飞书 CLI |
-| 4 | 把可执行文件 `feishu-bot-claude` 软链接到 `/opt/homebrew/bin/`(让你全局能调) |
-| 5 | 写一份 `~/Library/LaunchAgents/com.qingyun.feishu-bot-claude.plist` 并 load 它(开机自启 daemon) |
-| 6 | 把 `commands/bot-*.md` 安装到 `~/.claude/commands/`(让 Claude TUI 里可以用 `/bot-new` 等斜杠命令) |
+| 1 | 检测 + (经你同意后)自动装 brew、python3、tmux、node |
+| 2 | `npm i -g` 装 lark-cli、Claude Code,可选装 mermaid-cli |
+| 3 | 在项目目录建 `.venv/` Python 虚拟环境(不污染全局) |
+| 4 | `pip install -e .` 装项目本体 |
+| 5 | 把可执行文件 `feishu-bot-claude` 软链接到 `/opt/homebrew/bin/`(让你全局能调) |
+| 6 | 写一份 `~/Library/LaunchAgents/com.qingyun.feishu-bot-claude.plist` 并 load 它(开机自启 daemon) |
+| 7 | 把 `commands/bot-*.md` 安装到 `~/.claude/commands/`(让 Claude TUI 里可以用 `/bot-new` 等斜杠命令) |
 
 **装完验证**:
 
