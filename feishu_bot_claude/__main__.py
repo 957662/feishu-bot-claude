@@ -39,14 +39,29 @@ async def _run_daemon() -> None:
     from feishu_bot_claude.config.keychain import MacOSKeychainStore
 
     store = BindingStore(bindings_path)
+    keychain = MacOSKeychainStore()
+
+    def _lark_for_binding(cfg) -> RealLarkCli:
+        """Build a RealLarkCli that owns its WS event source per binding.
+
+        The WS client subscribes to message + menu + card.action events for
+        this specific app, replacing the lark-cli `event consume` subprocess
+        which is dead code for menu/card events.
+        """
+        secret = keychain.get(cfg.secret_ref) if cfg.secret_ref else None
+        return RealLarkCli(
+            ws_app_id=cfg.feishu_app_id,
+            ws_app_secret=secret,
+            ws_domain=cfg.domain or "https://open.feishu.cn",
+        )
+
     orchestrator = Orchestrator(
         store=store,
         tmux_factory=lambda name: RealTmux(),
-        lark_factory=lambda cfg: RealLarkCli(),
+        lark_factory=_lark_for_binding,
         data_dir=data_dir,
     )
 
-    keychain = MacOSKeychainStore()
     real_lark = RealLarkCli()
 
     server = await serve(

@@ -176,6 +176,8 @@
 
 > **注**:`lark-cli` 不需要你手动装,`setup.sh` 会跑 `npm i -g @larksuite/cli` 自动装好。
 
+> **可选**:装 `mermaid-cli` 可以把 ` ```mermaid ` 代码块自动渲染成图片插到卡片里 — `npm i -g @mermaid-js/mermaid-cli`。没装也能跑,会自动回退到 `mermaid.ink` 在线服务;两个都失败时保留原始代码块文本。
+
 ## 📥 安装
 
 ```bash
